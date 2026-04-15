@@ -22,7 +22,16 @@ def get_full_path(node):
         return f"{base}{index}"
     return ""
 
-def get_json_from_py(file_path, nodes_count):
+def get_path_from_name(name, data_path):
+    splitted_name = name.split("-")
+    current_path = data_path
+    for name in splitted_name[:-1]:
+        current_path = current_path / name 
+        current_path.mkdir(parents=True, exist_ok=True)
+    current_path = current_path / splitted_name[-1]
+    return current_path
+
+def get_json_from_py(file_path, nodes_count=None):
     with open(file_path, "r") as f:
         tree = ast.parse(f.read())
     
@@ -36,7 +45,8 @@ def get_json_from_py(file_path, nodes_count):
                 var_name = node.targets[0].id
                 node_type = node.value.args[0].value[10:]
                 nodes.append(f"{var_name}:{node_type}")
-                nodes_count[node_type] += 1
+                if nodes_count != None:
+                    nodes_count[node_type] += 1
 
         # for properties   
         elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Attribute):
@@ -48,9 +58,10 @@ def get_json_from_py(file_path, nodes_count):
             try:
                 # literal_eval handles numbers, strings, and lists [r,g,b,a]
                 val = ast.literal_eval(node.value)
+               
+                if isinstance(val, str): val = f"'{val}'"
                 if isinstance(val, float): val = round(val, 3)
-                if isinstance(val, list): val = [round(x, 2) if isinstance(x, float) else x for x in val]
-                if isinstance(val, str): val = f'{val}'
+                if isinstance(val, list): val = [round(x, 2) if isinstance(x, float) else x for x in val]  
 
                 props.append(f"{path}:{val}")
             except:
@@ -58,25 +69,32 @@ def get_json_from_py(file_path, nodes_count):
 
         # for links
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            if getattr(node.value.func, 'attr', None) == 'new' and len(node.value.args) == 2:
+            if getattr(node.value.func, 'attr', None) == 'new':
                 out_part = node.value.args[0]
-                # handling rgb_curves node which has .new attribute but is a property.
-                if isinstance(out_part.value, float):
+
+                # handling any .new attribute of nodes.
+                if not isinstance(out_part, ast.Subscript):
                     target = node.value.func
                     path = get_full_path(target)
                     try:
-                        val = []
-                        for arg in node.value.args:
-                            val.append(arg.value)
-                        if isinstance(val, float): val = round(val, 3)
-                        if isinstance(val, list): val = [round(x, 2) if isinstance(x, float) else x for x in val]
-                        if isinstance(val, str): val = f'{val}'
-        
+                        if len(node.value.args) != 1:
+                            val = []
+                            for arg in node.value.args:
+                                val.append(arg.value)
+                            if isinstance(val, str): val = f"'{val}'"
+                            if isinstance(val, float): val = round(val, 3)
+                            if isinstance(val, list): val = [round(x, 2) if isinstance(x, float) else x for x in val]
+                        else:
+                            val = node.value.args[0].value
+                            if isinstance(val, str): val = f"'{val}'"
+                            if isinstance(val, float): val = round(val, 3)
+                            if isinstance(val, list): val = [round(x, 2) if isinstance(x, float) else x for x in val]
+
                         props.append(f"{path}:{val}")
                     except Exception as e:
                         print(f"Was not able to process {path} because {e}")
                     continue
-
+                
                 in_part = node.value.args[1]
                 links.append(f"{out_part.value.value.id}.{out_part.slice.value}>{in_part.value.value.id}.{in_part.slice.value}")
 
@@ -106,11 +124,14 @@ def main(dataset_dir="material_dataset_filtered"):
         if str(file_path) in group_set:
             continue
 
+        txt_file_name = "-".join(str(file_path.with_suffix(".txt")).split("/")[1:])
+        txt_file_path = get_path_from_name(txt_file_name, txt_data_save_path)
+
+        # if txt_file_path.exists():
+        #     continue
+
         try:
             text = get_json_from_py(file_path, nodes_count)
-
-            txt_file_name = "-".join(str(file_path.with_suffix(".txt")).split("/")[1:])
-            txt_file_path = txt_data_save_path / txt_file_name
             
             with open(txt_file_path, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -130,3 +151,4 @@ if __name__ == "__main__":
     # text = get_json_from_py("material_dataset_filtered/mat_llm_r2/case_01048_gen_03/var_00009_full.py")
     # with open("test_file.txt", "w") as f:
     #     f.write(text)
+    #     print(text)

@@ -1,0 +1,1108 @@
+{
+    "ShaderNodeAddShader": {
+        "inputs": [
+            "Shader",
+            "Shader_001"
+        ],
+        "outputs": [
+            "Shader"
+        ]
+    },
+    "ShaderNodeAmbientOcclusion": {
+        "inputs": [
+            "Color",
+            "Distance",
+            "Normal"
+        ],
+        "outputs": [
+            "Color",
+            "AO"
+        ]
+    },
+    "ShaderNodeAttribute": {
+        "inputs": [],
+        "outputs": [
+            "Color",
+            "Vector",
+            "Fac",
+            "Alpha"
+        ]
+    },
+    "ShaderNodeBackground": {
+        "inputs": [
+            "Color",
+            "Strength",
+            "Weight"
+        ],
+        "outputs": [
+            "Background"
+        ]
+    },
+    "ShaderNodeBevel": {
+        "inputs": [
+            "Radius",
+            "Normal"
+        ],
+        "outputs": [
+            "Normal"
+        ]
+    },
+    "ShaderNodeBlackbody": {
+        "inputs": [
+            "Temperature"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeBrightContrast": {
+        "inputs": [
+            "Color",
+            "Bright",
+            "Contrast"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeBsdfAnisotropic": {
+        "inputs": [
+            "Color",
+            "Roughness",
+            "Anisotropy",
+            "Rotation",
+            "Normal",
+            "Tangent",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfDiffuse": {
+        "inputs": [
+            "Color",
+            "Roughness",
+            "Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfGlass": {
+        "inputs": [
+            "Color",
+            "Roughness",
+            "IOR",
+            "Normal",
+            "Weight",
+            "Thin Film Thickness",
+            "Thin Film IOR"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfHair": {
+        "inputs": [
+            "Color",
+            "Offset",
+            "RoughnessU",
+            "RoughnessV",
+            "Tangent",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfHairPrincipled": {
+        "inputs": [
+            "Color",
+            "Melanin",
+            "Melanin Redness",
+            "Tint",
+            "Absorption Coefficient",
+            "Aspect Ratio",
+            "Roughness",
+            "Radial Roughness",
+            "Coat",
+            "IOR",
+            "Offset",
+            "Random Color",
+            "Random Roughness",
+            "Random",
+            "Weight",
+            "R lobe",
+            "TT lobe",
+            "TRT lobe"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfMetallic": {
+        "inputs": [
+            "Base Color",
+            "Edge Tint",
+            "IOR",
+            "Extinction",
+            "Roughness",
+            "Anisotropy",
+            "Rotation",
+            "Normal",
+            "Tangent",
+            "Weight",
+            "Thin Film Thickness",
+            "Thin Film IOR"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfPrincipled": {
+        "inputs": [
+            "Base Color",
+            "Metallic",
+            "Roughness",
+            "IOR",
+            "Alpha",
+            "Normal",
+            "Weight",
+            "Diffuse Roughness",
+            "Subsurface Weight",
+            "Subsurface Radius",
+            "Subsurface Scale",
+            "Subsurface IOR",
+            "Subsurface Anisotropy",
+            "Specular IOR Level",
+            "Specular Tint",
+            "Anisotropic",
+            "Anisotropic Rotation",
+            "Tangent",
+            "Transmission Weight",
+            "Coat Weight",
+            "Coat Roughness",
+            "Coat IOR",
+            "Coat Tint",
+            "Coat Normal",
+            "Sheen Weight",
+            "Sheen Roughness",
+            "Sheen Tint",
+            "Emission Color",
+            "Emission Strength",
+            "Thin Film Thickness",
+            "Thin Film IOR"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfRayPortal": {
+        "inputs": [
+            "Color",
+            "Position",
+            "Direction",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfRefraction": {
+        "inputs": [
+            "Color",
+            "Roughness",
+            "IOR",
+            "Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfSheen": {
+        "inputs": [
+            "Color",
+            "Roughness",
+            "Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfToon": {
+        "inputs": [
+            "Color",
+            "Size",
+            "Smooth",
+            "Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfTranslucent": {
+        "inputs": [
+            "Color",
+            "Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBsdfTransparent": {
+        "inputs": [
+            "Color",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeBump": {
+        "inputs": [
+            "Strength",
+            "Distance",
+            "Filter Width",
+            "Height",
+            "Normal"
+        ],
+        "outputs": [
+            "Normal"
+        ]
+    },
+    "ShaderNodeCameraData": {
+        "inputs": [],
+        "outputs": [
+            "View Vector",
+            "View Z Depth",
+            "View Distance"
+        ]
+    },
+    "ShaderNodeClamp": {
+        "inputs": [
+            "Value",
+            "Min",
+            "Max"
+        ],
+        "outputs": [
+            "Result"
+        ]
+    },
+    "ShaderNodeCombineColor": {
+        "inputs": [
+            "Red",
+            "Green",
+            "Blue"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeCombineXYZ": {
+        "inputs": [
+            "X",
+            "Y",
+            "Z"
+        ],
+        "outputs": [
+            "Vector"
+        ]
+    },
+    "ShaderNodeDisplacement": {
+        "inputs": [
+            "Height",
+            "Midlevel",
+            "Scale",
+            "Normal"
+        ],
+        "outputs": [
+            "Displacement"
+        ]
+    },
+    "ShaderNodeEeveeSpecular": {
+        "inputs": [
+            "Base Color",
+            "Specular",
+            "Roughness",
+            "Emissive Color",
+            "Transparency",
+            "Normal",
+            "Clear Coat",
+            "Clear Coat Roughness",
+            "Clear Coat Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSDF"
+        ]
+    },
+    "ShaderNodeEmission": {
+        "inputs": [
+            "Color",
+            "Strength",
+            "Weight"
+        ],
+        "outputs": [
+            "Emission"
+        ]
+    },
+    "ShaderNodeFloatCurve": {
+        "inputs": [
+            "Factor",
+            "Value"
+        ],
+        "outputs": [
+            "Value"
+        ]
+    },
+    "ShaderNodeFresnel": {
+        "inputs": [
+            "IOR",
+            "Normal"
+        ],
+        "outputs": [
+            "Fac"
+        ]
+    },
+    "ShaderNodeGamma": {
+        "inputs": [
+            "Color",
+            "Gamma"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeGroup": {
+        "inputs": [],
+        "outputs": []
+    },
+    "ShaderNodeHairInfo": {
+        "inputs": [],
+        "outputs": [
+            "Is Strand",
+            "Intercept",
+            "Length",
+            "Thickness",
+            "Tangent Normal",
+            "Random"
+        ]
+    },
+    "ShaderNodeHoldout": {
+        "inputs": [
+            "Weight"
+        ],
+        "outputs": [
+            "Holdout"
+        ]
+    },
+    "ShaderNodeHueSaturation": {
+        "inputs": [
+            "Hue",
+            "Saturation",
+            "Value",
+            "Fac",
+            "Color"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeInvert": {
+        "inputs": [
+            "Fac",
+            "Color"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeLayerWeight": {
+        "inputs": [
+            "Blend",
+            "Normal"
+        ],
+        "outputs": [
+            "Fresnel",
+            "Facing"
+        ]
+    },
+    "ShaderNodeLightFalloff": {
+        "inputs": [
+            "Strength",
+            "Smooth"
+        ],
+        "outputs": [
+            "Quadratic",
+            "Linear",
+            "Constant"
+        ]
+    },
+    "ShaderNodeLightPath": {
+        "inputs": [],
+        "outputs": [
+            "Is Camera Ray",
+            "Is Shadow Ray",
+            "Is Diffuse Ray",
+            "Is Glossy Ray",
+            "Is Singular Ray",
+            "Is Reflection Ray",
+            "Is Transmission Ray",
+            "Is Volume Scatter Ray",
+            "Ray Length",
+            "Ray Depth",
+            "Diffuse Depth",
+            "Glossy Depth",
+            "Transparent Depth",
+            "Transmission Depth",
+            "Portal Depth"
+        ]
+    },
+    "ShaderNodeMapRange": {
+        "inputs": [
+            "Value",
+            "From Min",
+            "From Max",
+            "To Min",
+            "To Max",
+            "Steps",
+            "Vector",
+            "From_Min_FLOAT3",
+            "From_Max_FLOAT3",
+            "To_Min_FLOAT3",
+            "To_Max_FLOAT3",
+            "Steps_FLOAT3"
+        ],
+        "outputs": [
+            "Result",
+            "Vector"
+        ]
+    },
+    "ShaderNodeMapping": {
+        "inputs": [
+            "Vector",
+            "Location",
+            "Rotation",
+            "Scale"
+        ],
+        "outputs": [
+            "Vector"
+        ]
+    },
+    "ShaderNodeMath": {
+        "inputs": [
+            "Value",
+            "Value_001",
+            "Value_002"
+        ],
+        "outputs": [
+            "Value"
+        ]
+    },
+    "ShaderNodeMix": {
+        "inputs": [
+            "Factor_Float",
+            "Factor_Vector",
+            "A_Float",
+            "B_Float",
+            "A_Vector",
+            "B_Vector",
+            "A_Color",
+            "B_Color",
+            "A_Rotation",
+            "B_Rotation"
+        ],
+        "outputs": [
+            "Result_Float",
+            "Result_Vector",
+            "Result_Color",
+            "Result_Rotation"
+        ]
+    },
+    "ShaderNodeMixRGB": {
+        "inputs": [
+            "Fac",
+            "Color1",
+            "Color2"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeMixShader": {
+        "inputs": [
+            "Fac",
+            "Shader",
+            "Shader_001"
+        ],
+        "outputs": [
+            "Shader"
+        ]
+    },
+    "ShaderNodeNewGeometry": {
+        "inputs": [],
+        "outputs": [
+            "Position",
+            "Normal",
+            "Tangent",
+            "True Normal",
+            "Incoming",
+            "Parametric",
+            "Backfacing",
+            "Pointiness",
+            "Random Per Island"
+        ]
+    },
+    "ShaderNodeNormal": {
+        "inputs": [
+            "Normal"
+        ],
+        "outputs": [
+            "Normal",
+            "Dot"
+        ]
+    },
+    "ShaderNodeNormalMap": {
+        "inputs": [
+            "Strength",
+            "Color"
+        ],
+        "outputs": [
+            "Normal"
+        ]
+    },
+    "ShaderNodeObjectInfo": {
+        "inputs": [],
+        "outputs": [
+            "Location",
+            "Color",
+            "Alpha",
+            "Object Index",
+            "Material Index",
+            "Random"
+        ]
+    },
+    "ShaderNodeOutputAOV": {
+        "inputs": [
+            "Color",
+            "Value"
+        ],
+        "outputs": []
+    },
+    "ShaderNodeOutputLight": {
+        "inputs": [
+            "Surface"
+        ],
+        "outputs": []
+    },
+    "ShaderNodeOutputLineStyle": {
+        "inputs": [
+            "Color",
+            "Color Fac",
+            "Alpha",
+            "Alpha Fac"
+        ],
+        "outputs": []
+    },
+    "ShaderNodeOutputMaterial": {
+        "inputs": [
+            "Surface",
+            "Volume",
+            "Displacement",
+            "Thickness"
+        ],
+        "outputs": []
+    },
+    "ShaderNodeOutputWorld": {
+        "inputs": [
+            "Surface",
+            "Volume"
+        ],
+        "outputs": []
+    },
+    "ShaderNodeParticleInfo": {
+        "inputs": [],
+        "outputs": [
+            "Index",
+            "Random",
+            "Age",
+            "Lifetime",
+            "Location",
+            "Size",
+            "Velocity",
+            "Angular Velocity"
+        ]
+    },
+    "ShaderNodePointInfo": {
+        "inputs": [],
+        "outputs": [
+            "Position",
+            "Radius",
+            "Random"
+        ]
+    },
+    "ShaderNodeRGB": {
+        "inputs": [],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeRGBCurve": {
+        "inputs": [
+            "Fac",
+            "Color"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeRGBToBW": {
+        "inputs": [
+            "Color"
+        ],
+        "outputs": [
+            "Val"
+        ]
+    },
+    "ShaderNodeRadialTiling": {
+        "inputs": [
+            "Vector",
+            "Sides",
+            "Roundness"
+        ],
+        "outputs": [
+            "Segment Coordinates",
+            "Segment ID",
+            "Segment Width",
+            "Segment Rotation"
+        ]
+    },
+    "ShaderNodeRaycast": {
+        "inputs": [
+            "Position",
+            "Direction",
+            "Length"
+        ],
+        "outputs": [
+            "Is Hit",
+            "Self Hit",
+            "Hit Distance",
+            "Hit Position",
+            "Hit Normal"
+        ]
+    },
+    "ShaderNodeScript": {
+        "inputs": [],
+        "outputs": []
+    },
+    "ShaderNodeSeparateColor": {
+        "inputs": [
+            "Color"
+        ],
+        "outputs": [
+            "Red",
+            "Green",
+            "Blue"
+        ]
+    },
+    "ShaderNodeSeparateXYZ": {
+        "inputs": [
+            "Vector"
+        ],
+        "outputs": [
+            "X",
+            "Y",
+            "Z"
+        ]
+    },
+    "ShaderNodeShaderToRGB": {
+        "inputs": [
+            "Shader"
+        ],
+        "outputs": [
+            "Color",
+            "Alpha"
+        ]
+    },
+    "ShaderNodeSqueeze": {
+        "inputs": [
+            "Value",
+            "Width",
+            "Center"
+        ],
+        "outputs": [
+            "Value"
+        ]
+    },
+    "ShaderNodeSubsurfaceScattering": {
+        "inputs": [
+            "Color",
+            "Scale",
+            "Radius",
+            "IOR",
+            "Roughness",
+            "Anisotropy",
+            "Normal",
+            "Weight"
+        ],
+        "outputs": [
+            "BSSRDF"
+        ]
+    },
+    "ShaderNodeTangent": {
+        "inputs": [],
+        "outputs": [
+            "Tangent"
+        ]
+    },
+    "ShaderNodeTexBrick": {
+        "inputs": [
+            "Vector",
+            "Color1",
+            "Color2",
+            "Mortar",
+            "Scale",
+            "Mortar Size",
+            "Mortar Smooth",
+            "Bias",
+            "Brick Width",
+            "Row Height"
+        ],
+        "outputs": [
+            "Color",
+            "Fac"
+        ]
+    },
+    "ShaderNodeTexChecker": {
+        "inputs": [
+            "Vector",
+            "Color1",
+            "Color2",
+            "Scale"
+        ],
+        "outputs": [
+            "Color",
+            "Fac"
+        ]
+    },
+    "ShaderNodeTexCoord": {
+        "inputs": [],
+        "outputs": [
+            "Generated",
+            "Normal",
+            "UV",
+            "Object",
+            "Camera",
+            "Window",
+            "Reflection"
+        ]
+    },
+    "ShaderNodeTexEnvironment": {
+        "inputs": [
+            "Vector"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeTexGabor": {
+        "inputs": [
+            "Vector",
+            "Scale",
+            "Frequency",
+            "Anisotropy",
+            "Orientation 2D",
+            "Orientation 3D"
+        ],
+        "outputs": [
+            "Value",
+            "Phase",
+            "Intensity"
+        ]
+    },
+    "ShaderNodeTexGradient": {
+        "inputs": [
+            "Vector"
+        ],
+        "outputs": [
+            "Color",
+            "Fac"
+        ]
+    },
+    "ShaderNodeTexIES": {
+        "inputs": [
+            "Vector",
+            "Strength"
+        ],
+        "outputs": [
+            "Fac"
+        ]
+    },
+    "ShaderNodeTexImage": {
+        "inputs": [
+            "Vector"
+        ],
+        "outputs": [
+            "Color",
+            "Alpha"
+        ]
+    },
+    "ShaderNodeTexMagic": {
+        "inputs": [
+            "Vector",
+            "Scale",
+            "Distortion"
+        ],
+        "outputs": [
+            "Color",
+            "Fac"
+        ]
+    },
+    "ShaderNodeTexNoise": {
+        "inputs": [
+            "Vector",
+            "W",
+            "Scale",
+            "Detail",
+            "Roughness",
+            "Lacunarity",
+            "Offset",
+            "Gain",
+            "Distortion"
+        ],
+        "outputs": [
+            "Fac",
+            "Color"
+        ]
+    },
+    "ShaderNodeTexSky": {
+        "inputs": [
+            "Vector"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeTexVoronoi": {
+        "inputs": [
+            "Vector",
+            "W",
+            "Scale",
+            "Detail",
+            "Roughness",
+            "Lacunarity",
+            "Smoothness",
+            "Exponent",
+            "Randomness"
+        ],
+        "outputs": [
+            "Distance",
+            "Color",
+            "Position",
+            "W",
+            "Radius"
+        ]
+    },
+    "ShaderNodeTexWave": {
+        "inputs": [
+            "Vector",
+            "Scale",
+            "Distortion",
+            "Detail",
+            "Detail Scale",
+            "Detail Roughness",
+            "Phase Offset"
+        ],
+        "outputs": [
+            "Color",
+            "Fac"
+        ]
+    },
+    "ShaderNodeTexWhiteNoise": {
+        "inputs": [
+            "Vector",
+            "W"
+        ],
+        "outputs": [
+            "Value",
+            "Color"
+        ]
+    },
+    "ShaderNodeUVAlongStroke": {
+        "inputs": [],
+        "outputs": [
+            "UV"
+        ]
+    },
+    "ShaderNodeUVMap": {
+        "inputs": [],
+        "outputs": [
+            "UV"
+        ]
+    },
+    "ShaderNodeValToRGB": {
+        "inputs": [
+            "Fac"
+        ],
+        "outputs": [
+            "Color",
+            "Alpha"
+        ]
+    },
+    "ShaderNodeValue": {
+        "inputs": [],
+        "outputs": [
+            "Value"
+        ]
+    },
+    "ShaderNodeVectorCurve": {
+        "inputs": [
+            "Fac",
+            "Vector"
+        ],
+        "outputs": [
+            "Vector"
+        ]
+    },
+    "ShaderNodeVectorDisplacement": {
+        "inputs": [
+            "Vector",
+            "Midlevel",
+            "Scale"
+        ],
+        "outputs": [
+            "Displacement"
+        ]
+    },
+    "ShaderNodeVectorMath": {
+        "inputs": [
+            "Vector",
+            "Vector_001",
+            "Vector_002",
+            "Scale"
+        ],
+        "outputs": [
+            "Vector",
+            "Value"
+        ]
+    },
+    "ShaderNodeVectorRotate": {
+        "inputs": [
+            "Vector",
+            "Center",
+            "Axis",
+            "Angle",
+            "Rotation"
+        ],
+        "outputs": [
+            "Vector"
+        ]
+    },
+    "ShaderNodeVectorTransform": {
+        "inputs": [
+            "Vector"
+        ],
+        "outputs": [
+            "Vector"
+        ]
+    },
+    "ShaderNodeVertexColor": {
+        "inputs": [],
+        "outputs": [
+            "Color",
+            "Alpha"
+        ]
+    },
+    "ShaderNodeVolumeAbsorption": {
+        "inputs": [
+            "Color",
+            "Density",
+            "Weight"
+        ],
+        "outputs": [
+            "Volume"
+        ]
+    },
+    "ShaderNodeVolumeCoefficients": {
+        "inputs": [
+            "Weight",
+            "Absorption Coefficients",
+            "Scatter Coefficients",
+            "Anisotropy",
+            "IOR",
+            "Backscatter",
+            "Alpha",
+            "Diameter",
+            "Emission Coefficients"
+        ],
+        "outputs": [
+            "Volume"
+        ]
+    },
+    "ShaderNodeVolumeInfo": {
+        "inputs": [],
+        "outputs": [
+            "Color",
+            "Density",
+            "Flame",
+            "Temperature"
+        ]
+    },
+    "ShaderNodeVolumePrincipled": {
+        "inputs": [
+            "Color",
+            "Color Attribute",
+            "Density",
+            "Density Attribute",
+            "Anisotropy",
+            "Absorption Color",
+            "Emission Strength",
+            "Emission Color",
+            "Blackbody Intensity",
+            "Blackbody Tint",
+            "Temperature",
+            "Temperature Attribute",
+            "Weight"
+        ],
+        "outputs": [
+            "Volume"
+        ]
+    },
+    "ShaderNodeVolumeScatter": {
+        "inputs": [
+            "Color",
+            "Density",
+            "Anisotropy",
+            "IOR",
+            "Backscatter",
+            "Alpha",
+            "Diameter",
+            "Weight"
+        ],
+        "outputs": [
+            "Volume"
+        ]
+    },
+    "ShaderNodeWavelength": {
+        "inputs": [
+            "Wavelength"
+        ],
+        "outputs": [
+            "Color"
+        ]
+    },
+    "ShaderNodeWireframe": {
+        "inputs": [
+            "Size"
+        ],
+        "outputs": [
+            "Fac"
+        ]
+    }
+}
