@@ -15,6 +15,7 @@ import bpy
 from pathlib import Path
 import json
 from tqdm.auto import tqdm 
+import shutil
 
 
 def get_path_from_name(name, data_path):
@@ -26,11 +27,10 @@ def get_path_from_name(name, data_path):
     current_path = current_path / splitted_name[-1]
     return current_path
 
-
 convert_code = dsl.ConvertCodeToDSL()
 
-dataset_path = Path("material_dataset_filtered")
-data_save_folder = Path("CurrentDataset/txt")
+dataset_path = Path("material_dataset_filtered/infinigen")
+data_save_folder = Path("Dataset")
 print("Starting conversion ...")
 
 with open("JSON_files/groups.json", "r") as f:
@@ -51,12 +51,23 @@ for file_path in tqdm(py_files):
     txt_file_name = "-".join(str(file_path.with_suffix(".txt")).split("/")[1:])
     txt_file_path = get_path_from_name(txt_file_name, data_save_folder)
 
+    file_path_parts = str(file_path).split("_")
+    file_path_parts[-1] = "render.jpg"
+    img_source_path = "_".join(file_path_parts)
+
+    save_file_path_parts = str(txt_file_path).split("_")
+    save_file_path_parts[-1] = "render.jpg"
+    img_save_path = "_".join(save_file_path_parts)
+
     try:
         text = convert_code.convert(file_path, txt_file_path)
+        shutil.copy(img_source_path, img_save_path)
+
         count += 1
     except Exception as e:
         print(f"{file_path} : {e}")
         continue
+    # break
 
 print("completed conversions...")
 print(f"converted {count} .py files into .txt successfully")

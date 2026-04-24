@@ -1,0 +1,8 @@
+{
+    "Vector not available as input in ShaderNodeTexNoise when noise_dimensions:1D,noise_type:FBM,normalize:True": 5,
+    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:F1,normalize:False": 2,
+    "Position not available as output in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:F1,normalize:False": 2,
+    "Distance not available as output in ShaderNodeTexVoronoi when voronoi_dimensions:4D,distance:MINKOWSKI,feature:N_SPHERE_RADIUS,normalize:False": 3,
+    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:SMOOTH_F1,normalize:False": 1,
+    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:DISTANCE_TO_EDGE,normalize:False": 1
+}

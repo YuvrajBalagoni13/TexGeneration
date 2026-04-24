@@ -664,18 +664,26 @@ class ConvertCodeToDSL:
                 target = node.targets[0]
                 try:     
                     path = self.get_full_path(target)
+                    path_list = path.split(".")
+                    
                     if path:  # Only process if we got a valid path
                         val = ast.literal_eval(node.value)
+
+                    if path_list[-1] == "default_value":
+                        path_list[-1] = "dv"
+                        path = ".".join(path_list)
+                        if path_list[-2].split("-")[-1] in ["Specular Tint", "Sheen Tint"]:
+                            val = [val, val, val, 1]
                         
-                        # Format value
-                        if isinstance(val, str):
-                            val = f"'{val}'"
-                        elif isinstance(val, float):
-                            val = round(val, 3)
-                        elif isinstance(val, list):
-                            val = [round(v, 3) if isinstance(v, float) else v for v in val]
+                    # Format value
+                    if isinstance(val, str):
+                        val = f"'{val}'"
+                    elif isinstance(val, float):
+                        val = round(val, 3)
+                    elif isinstance(val, list):
+                        val = [round(v, 3) if isinstance(v, float) else v for v in val]
                         
-                        self.dsl_shader.properties_info.append(f"{path}:{val}")
+                    self.dsl_shader.properties_info.append(f"{path}:{val}")
                 except Exception as e:
                     # Don't raise, just skip problematic properties
                     pass
@@ -683,7 +691,7 @@ class ConvertCodeToDSL:
             # Links
             elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                 if getattr(node.value.func, 'attr', None) == 'new':
-                    if len(node.value.args) >= 2:
+                    if len(node.value.args) == 2:
                         out_part = node.value.args[0]
                         in_part = node.value.args[1]
                         
@@ -695,13 +703,42 @@ class ConvertCodeToDSL:
                                 in_idx = in_part.slice.value
                                 
                                 if out_var in self.current_node_vartype_mapping:
-                                    out_socket_name = self.nodes_data_v36[self.current_node_vartype_mapping[out_var]]["outputs"][out_idx]
-                                    in_socket_name = self.nodes_data_v36[self.current_node_vartype_mapping[in_var]]["inputs"][in_idx]
-                                    
+                                    out_node_type, in_node_type = self.current_node_vartype_mapping[out_var], self.current_node_vartype_mapping[in_var]
+                                    out_socket_name = self.nodes_data_v36[out_node_type]["outputs"][out_idx]
+                                    in_socket_name = self.nodes_data_v36[in_node_type]["inputs"][in_idx]
+                                    if out_socket_name not in self.nodes_data_v51[out_node_type]["outputs"]:
+                                        raise ValueError(f"{out_socket_name} does not exist as output to {out_node_type}")
+                                    if in_socket_name not in self.nodes_data_v51[in_node_type]["inputs"]:
+                                        raise ValueError(f"{in_socket_name} does not exist as input to {in_node_type}")
                                     self.dsl_shader.links_info.append(f"{out_var}.{out_socket_name}>{in_var}.{in_socket_name}")
                             except Exception as e:
                                 print(f"Link error: {e}")
                                 continue
+                    else:
+                        try:
+                            target = node.value.func
+                            path = self.get_full_path(target)
+
+                            if len(node.value.args) == 1:
+                                val = node.value.args[0].value
+                            elif len(node.value.args) > 2:
+                                val = []
+                                for i in len(node.value.args):
+                                    val.append(node.value.args[i].value)
+
+                            print(val)
+                            # Format value
+                            if isinstance(val, str):
+                                val = f"'{val}'"
+                            elif isinstance(val, float):
+                                val = round(val, 3)
+                            elif isinstance(val, list):
+                                val = [round(v, 3) if isinstance(v, float) else v for v in val]
+                                
+                            self.dsl_shader.properties_info.append(f"{path}:{val}")
+                        except:
+                            raise ValueError(f"Not able to create new for part of node.")
+
 
         # Validate with material reuse
         # valid, error = self.dsl_shader.validate_dsl(reuse_material=True)

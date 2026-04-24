@@ -40,6 +40,6 @@ if __name__ == "__main__":
     sampler = SampleRetriever()
     results = sampler.retrieve("bsdf_bricktex_dataset/test/images/ShaderNodeBsdfPrincipled_ShaderNodeTexBrick_000_092.png")
 
-    print(results)
-    # for ids in results['ids'][0]:
-    #     print(ids)
+    # print(results)
+    for ids in results['ids'][0]:
+        print(ids)

@@ -1,7 +1,9 @@
 chromadb/
 CurrentDataset/
-Datasets/
+Dataset/
+past_dataset/
 grouptxt/
 material_dataset_filtered/
+/Test.blend
 /Test.blend1
 /VLMaterial.pdf
