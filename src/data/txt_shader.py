@@ -202,7 +202,7 @@ class TextShader:
 
 
 if __name__ == "__main__":
-    unique_error_logs = defaultdict(int)
+    unique_error_logs = defaultdict(list)
     dataset_path = Path("Dataset/infinigen")
     txt_files = list(dataset_path.rglob("*.txt"))
     for files in tqdm(txt_files):
@@ -213,7 +213,7 @@ if __name__ == "__main__":
             material.node_tree.nodes.clear()
         except Exception as e:
             print(e, files)
-            unique_error_logs[f"{e}"] += 1
+            unique_error_logs[f"{e}"].append(str(files))
 
     with open("JSON_files/error_logs.json", "w") as f:
         json.dump(unique_error_logs, f, indent=4)
@@ -221,5 +221,5 @@ if __name__ == "__main__":
     print("logged errors.")
 
 """
-/mnt/Storage/ML/blender-5.1.0-linux-x64/blender --background --python src/txt_shader.py
+/mnt/Storage/ML/blender-5.1.0-linux-x64/blender --background --python src/data/txt_shader.py
 """

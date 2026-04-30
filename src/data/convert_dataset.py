@@ -73,5 +73,5 @@ print("completed conversions...")
 print(f"converted {count} .py files into .txt successfully")
 
 """
-/mnt/Storage/ML/blender-5.1.0-linux-x64/blender --background --python src/convert_dataset.py
+/mnt/Storage/ML/blender-5.1.0-linux-x64/blender --background --python src/data/convert_dataset.py
 """

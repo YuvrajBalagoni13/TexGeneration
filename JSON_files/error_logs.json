@@ -1,8 +1,28 @@
 {
-    "Vector not available as input in ShaderNodeTexNoise when noise_dimensions:1D,noise_type:FBM,normalize:True": 5,
-    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:F1,normalize:False": 2,
-    "Position not available as output in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:F1,normalize:False": 2,
-    "Distance not available as output in ShaderNodeTexVoronoi when voronoi_dimensions:4D,distance:MINKOWSKI,feature:N_SPHERE_RADIUS,normalize:False": 3,
-    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:SMOOTH_F1,normalize:False": 1,
-    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:DISTANCE_TO_EDGE,normalize:False": 1
+    "Vector not available as input in ShaderNodeTexNoise when noise_dimensions:1D,noise_type:FBM,normalize:True": [
+        "Dataset/infinigen/scale/00006.txt",
+        "Dataset/infinigen/stone/00002.txt",
+        "Dataset/infinigen/soil/00003.txt",
+        "Dataset/infinigen/dirt/00007.txt",
+        "Dataset/infinigen/snake_scale/00006.txt"
+    ],
+    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:F1,normalize:False": [
+        "Dataset/infinigen/cobble_stone/00007.txt",
+        "Dataset/infinigen/soil/00004.txt"
+    ],
+    "Position not available as output in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:F1,normalize:False": [
+        "Dataset/infinigen/cobble_stone/00008.txt",
+        "Dataset/infinigen/cobble_stone/00005.txt"
+    ],
+    "Distance not available as output in ShaderNodeTeexVoronoi when voronoi_dimensions:4D,distance:MINKOWSKI,feature:N_SPHERE_RADIUS,normalize:False": [
+        "Dataset/infinigen/snake_shaders/00006.txt",
+        "Dataset/infinigen/snake_shaders/00001.txt",
+        "Dataset/infinigen/snake_shaders/00004.txt"
+    ],
+    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:SMOOTH_F1,normalize:False": [
+        "Dataset/infinigen/dirt/00000.txt"
+    ],
+    "Vector not available as input in ShaderNodeTexVoronoi when voronoi_dimensions:1D,distance:MINKOWSKI,feature:DISTANCE_TO_EDGE,normalize:False": [
+        "Dataset/infinigen/dirt/00004.txt"
+    ]
 }
