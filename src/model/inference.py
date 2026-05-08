@@ -8,7 +8,7 @@ class Inference:
         if device:
             self.device = device
         else:
-            self.device = "cuda" if torch.cuda.is_available else "cpu"
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.model, self.tokenizer = FastVisionModel.from_pretrained(
             model_name,
@@ -36,7 +36,8 @@ class Inference:
         text_streamer = TextStreamer(self.tokenizer, skip_prompt = True)
         output = self.model.generate(**inputs, streamer = text_streamer, max_new_tokens = 128,
                    use_cache = True, temperature = 1.5, min_p = 0.1)
-        return output
+        decoded = self.tokenizer.decode(output[0], skip_special_tokens=True)
+        return decoded
     
 
 if __name__ == "__main__":
