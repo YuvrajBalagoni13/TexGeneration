@@ -3,10 +3,11 @@ from unsloth.trainer import UnslothVisionDataCollator
 import torch.nn as nn
 import torch
 from pathlib import Path
-from dataset import ShaderDataset
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler
 from tqdm.auto import tqdm
+
+from dataset import ShaderDataset
 
 # class TrainModel(nn.Module): 
 #     def __init__(self) -> None:
