@@ -1,3 +1,4 @@
+import os
 from unsloth import FastVisionModel
 from unsloth.trainer import UnslothVisionDataCollator
 import torch.nn as nn
@@ -56,6 +57,7 @@ def shader_collate_fn(batch, pad_token_id = 0):
     """
     input_ids = pad_sequence([b["input_ids"] for b in batch], batch_first=True, padding_value=pad_token_id)
     attention_mask = pad_sequence([b["attention_mask"] for b in batch], batch_first=True, padding_value=0)
+    mm_token_type_ids = pad_sequence([b["mm_token_type_ids"] for b in batch], batch_first=True, padding_value=0)
     labels = pad_sequence([b["labels"] for b in batch], batch_first=True, padding_value=-100)
 
     pixel_values = torch.stack([b["pixel_values"] for b in batch])
@@ -63,6 +65,7 @@ def shader_collate_fn(batch, pad_token_id = 0):
     result = {
         "input_ids" : input_ids,
         "attention_mask" : attention_mask,
+        "mm_token_type_ids" : mm_token_type_ids,
         "pixel_values" : pixel_values,
         "labels" : labels,
     }
@@ -74,13 +77,8 @@ def shader_collate_fn(batch, pad_token_id = 0):
 
 
 #################################
-#     wandb initialization      #
+#     log & save functions      #
 #################################
-wandb.init(project="TexGeneration", name="run_0.1", config = {
-    "epochs" : 5,
-    "batch_size" : 2
-})
-
 def log_metrics(epoch, iteration, loss):
     print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
     wandb.log({
@@ -88,6 +86,28 @@ def log_metrics(epoch, iteration, loss):
         "iteration" : iteration,
         "train loss" : loss
     })
+
+def save_checkpoint(epoch, iteration, run_name, model, processor, log_wandb):
+    print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
+    checkpoint_directory = f"./texgen_{run_name}_{epoch + 1}_{iteration}"
+    os.makedirs(checkpoint_directory, exist_ok=True)
+    model.save_pretrained(checkpoint_directory)
+    processor.save_pretrained(checkpoint_directory)
+
+    if log_wandb:
+        artifact = wandb.Artifact(
+            name=f"texgen_lora_{run_name}",
+            type="model",
+            description=f"LoRA adapter weights - epoch {epoch+1} iteration {iteration}",
+            metadata={
+                "epoch": epoch + 1,
+                "iteration": iteration,
+                "run_name": run_name,
+            }
+        )
+        artifact.add_dir(checkpoint_directory)  
+        wandb.log_artifact(artifact)
+    print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
 
 #################################
@@ -99,11 +119,12 @@ model, processor = FastVisionModel.from_pretrained(
     model_name = "unsloth/Qwen3.5-2B",
     load_in_4bit = True,
     use_gradient_checkpointing = "unsloth",
-    max_seq_length = 2048
+    max_seq_length = 2048,
+    dtype = torch.float16
 )
 
-for param in model.parameters():
-    param.requires_grad = False
+# for param in model.parameters():
+#     param.requires_grad = False
 
 model = FastVisionModel.get_peft_model(
     model, 
@@ -117,7 +138,7 @@ model = FastVisionModel.get_peft_model(
     bias = "none",
     random_state = 3697,
     use_rslora = True,
-)
+).to(device)
 
 model.print_trainable_parameters()
 
@@ -137,11 +158,14 @@ testing_dataloader = DataLoader(testing_dataset, batch_size=2, shuffle=False, co
 #     Training      #
 #####################
 model_optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-criterion = nn.CrossEntropyLoss(ignore_index = -100)
-gradient_scaler = GradScaler(enabled=(device == 'cuda'))
 
 total_epochs = 5
 ACCUMULATION_INTERVAL = 4
+
+wandb.init(project="TexGeneration", name="run_0.1", config = {
+    "epochs" : 5,
+    "batch_size" : 2
+})
 
 for epoch in range(total_epochs):
     model.train()
@@ -149,7 +173,9 @@ for epoch in range(total_epochs):
     progress_bar = tqdm(training_dataloader, leave = True)
     model_optimizer.zero_grad()
     for batch_idx, current_batch in enumerate(progress_bar):
-        batch = {k : v.to(device) for k, v in current_batch.items()}
+        batch = {k : v.to(torch.float16).to(device) if v.dtype == torch.float32 else v.to(device)
+                for k, v in current_batch.items()}
+        # batch = {k : v.to(device) for k, v in current_batch.items()}
 
         outputs = model(**batch)
         batch_loss = outputs.loss
@@ -165,8 +191,11 @@ for epoch in range(total_epochs):
         loss += batch_loss.item() * ACCUMULATION_INTERVAL
         progress_bar.set_postfix(loss = batch_loss.item() * ACCUMULATION_INTERVAL)
 
-        if batch_idx % 10 == 0:
+        if batch_idx % 5 == 0:
             log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
+
+        if batch_idx % 150 == 0:
+            save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, True)
 
     loss = loss / len(training_dataloader)
     print(f"total loss - {loss} after epochs - {total_epochs}")
@@ -174,12 +203,24 @@ for epoch in range(total_epochs):
     #######################
     #     Evaluation      #
     #######################
-    # model.eval()
-    # eval_loss = 0
-    # with torch.no_grad():
-    #     for eval_batch in tqdm(testing_dataloader):
-    #         eval_outputs = model(**eval_batch)
-    #         eval_batch_loss = outputs.loss
+    model.eval()
+    eval_loss = 0
+    with torch.no_grad():
+        for eval_batch in tqdm(testing_dataloader):
+            batch = {k : v.to(torch.float16).to(device) if v.dtype == torch.float32 else v.to(device)
+                     for k, v in eval_batch.items()}
+            
+            eval_outputs = model(**batch)
+            eval_batch_loss = eval_outputs.loss
 
-    #         eval_loss += eval_batch_loss.item()
+            eval_loss += eval_batch_loss.item()
+
+        wandb.log({
+            "epoch" : epoch,
+            "eval loss" : eval_loss / len(testing_dataloader)
+        })
+
+        print(f"Epoch {epoch} | evaluation loss - {eval_loss}")
+
+    save_checkpoint(epoch, 0, wandb.run.name, model, processor, True)
             
