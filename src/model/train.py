@@ -5,9 +5,12 @@ import torch
 from pathlib import Path
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler
+from torch.nn.utils.rnn import pad_sequence
 from tqdm.auto import tqdm
+from functools import partial
+import wandb
 
-from dataset import ShaderDataset
+from .dataset import ShaderDataset
 
 # class TrainModel(nn.Module): 
 #     def __init__(self) -> None:
@@ -47,6 +50,49 @@ from dataset import ShaderDataset
 #                 use_rslora = True,
 #             )
 
+def shader_collate_fn(batch, pad_token_id = 0):
+    """
+    Adds padding to all the values to stack the batches together.
+    """
+    input_ids = pad_sequence([b["input_ids"] for b in batch], batch_first=True, padding_value=pad_token_id)
+    attention_mask = pad_sequence([b["attention_mask"] for b in batch], batch_first=True, padding_value=0)
+    labels = pad_sequence([b["labels"] for b in batch], batch_first=True, padding_value=-100)
+
+    pixel_values = torch.stack([b["pixel_values"] for b in batch])
+
+    result = {
+        "input_ids" : input_ids,
+        "attention_mask" : attention_mask,
+        "pixel_values" : pixel_values,
+        "labels" : labels,
+    }
+
+    if "image_grid_thw" in batch[0]:
+        result["image_grid_thw"] = torch.stack([b["image_grid_thw"] for b in batch])
+    
+    return result
+
+
+#################################
+#     wandb initialization      #
+#################################
+wandb.init(project="TexGeneration", name="run_0.1", config = {
+    "epochs" : 5,
+    "batch_size" : 2
+})
+
+def log_metrics(epoch, iteration, loss):
+    print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
+    wandb.log({
+        "epoch" : epoch,
+        "iteration" : iteration,
+        "train loss" : loss
+    })
+
+
+#################################
+#     Model & lora Loading      #
+#################################
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model, processor = FastVisionModel.from_pretrained(
@@ -56,44 +102,84 @@ model, processor = FastVisionModel.from_pretrained(
     max_seq_length = 2048
 )
 
-# for param in model.parameters():
-    # param.requires_grad = False
-# 
-# model = FastVisionModel.get_peft_model(
-    # model, 
-    # finetune_vision_layers = True,
-    # finetune_language_layers = True,
-    # finetune_attention_modules = True,
-    # finetune_mlp_modules = True,
-    # r = 16,
-    # lora_alpha = 16,
-    # lora_dropout = 0,
-    # bias = "none",
-    # random_state = 3697,
-    # use_rslora = True,
-# )
-# 
-# model.print_trainable_parameters()
+for param in model.parameters():
+    param.requires_grad = False
 
-training_dataset = ShaderDataset("Dataset/train", processor)
-testing_dataset = ShaderDataset("Dataset/infigen", processor)
+model = FastVisionModel.get_peft_model(
+    model, 
+    finetune_vision_layers = True,
+    finetune_language_layers = True,
+    finetune_attention_modules = True,
+    finetune_mlp_modules = True,
+    r = 16,
+    lora_alpha = 16,
+    lora_dropout = 0,
+    bias = "none",
+    random_state = 3697,
+    use_rslora = True,
+)
 
-print(training_dataset[0])
-# training_dataloader = DataLoader(training_dataset, batch_size=4, shuffle=True, collate_fn=UnslothVisionDataCollator(model, processor))
-# testing_dataloader = DataLoader(testing_dataset, batch_size=4, shuffle=False, collate_fn=UnslothVisionDataCollator(model, processor))
+model.print_trainable_parameters()
 
-# model_optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-# criterion = nn.CrossEntropyLoss()
-# gradient_scaler = GradScaler(enabled=(device == 'cuda'))
+############################
+#     Dataset Loading      #
+############################
+training_dataset = ShaderDataset("Dataset/train", processor, max_seq_length=2048)
+testing_dataset = ShaderDataset("Dataset/infinigen", processor, max_seq_length=2048)
 
-# total_epochs = 3
+# this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
+collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
-# for epoch in range(total_epochs):
-#     model.train()
-#     loss = 0
-    
-#     for batch_idx, current_batch in tqdm(enumerate(training_dataloader)):
-#         token_ids = current_batch['input_ids'].to(device)
-#         mask_for_attention = current_batch['attention_mask'].to(device)
-#         pixel_data = current_batch['pixel_values'].to(device)
-#         grid_info = current_batch['image_grid_thw'].to(device)
+training_dataloader = DataLoader(training_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
+testing_dataloader = DataLoader(testing_dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
+ 
+ ####################
+#     Training      #
+#####################
+model_optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
+criterion = nn.CrossEntropyLoss(ignore_index = -100)
+gradient_scaler = GradScaler(enabled=(device == 'cuda'))
+
+total_epochs = 5
+ACCUMULATION_INTERVAL = 4
+
+for epoch in range(total_epochs):
+    model.train()
+    loss = 0
+    progress_bar = tqdm(training_dataloader, leave = True)
+    model_optimizer.zero_grad()
+    for batch_idx, current_batch in enumerate(progress_bar):
+        batch = {k : v.to(device) for k, v in current_batch.items()}
+
+        outputs = model(**batch)
+        batch_loss = outputs.loss
+
+        batch_loss = batch_loss / ACCUMULATION_INTERVAL
+        batch_loss.backward()
+
+        if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
+            model_optimizer.step()
+            model_optimizer.zero_grad()
+
+        loss += batch_loss.item() * ACCUMULATION_INTERVAL
+        progress_bar.set_postfix(loss = batch_loss.item() * ACCUMULATION_INTERVAL)
+
+        if batch_idx % 10 == 0:
+            log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
+
+    loss = loss / len(training_dataloader)
+    print(f"total loss - {loss} after epochs - {total_epochs}")
+
+    #######################
+    #     Evaluation      #
+    #######################
+    # model.eval()
+    # eval_loss = 0
+    # with torch.no_grad():
+    #     for eval_batch in tqdm(testing_dataloader):
+    #         eval_outputs = model(**eval_batch)
+    #         eval_batch_loss = outputs.loss
+
+    #         eval_loss += eval_batch_loss.item()
+            
