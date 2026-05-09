@@ -1,8 +1,9 @@
 import os
 from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 from peft import LoraConfig, get_peft_model
-from unsloth import FastVisionModel
-from unsloth.trainer import UnslothVisionDataCollator
+from transformers import BitsAndBytesConfig
+# from unsloth import FastVisionModel
+# from unsloth.trainer import UnslothVisionDataCollator
 import torch.nn as nn
 import torch
 from pathlib import Path
@@ -124,10 +125,17 @@ precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_b
 
 model_name = "Qwen/Qwen3.5-2B"
 
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit = True,
+    bnb_4bit_compute_dtype = precision_type,
+    bnb_4bit_use_double_quant = True,
+    bnb_4bit_quant_type = "nf4"
+)
 model = Qwen3_5ForConditionalGeneration.from_pretrained(
     model_name,
     torch_dtype=precision_type,
     device_map="auto",
+    quantization_config = bnb_config
 )
 processor = AutoProcessor.from_pretrained(model_name)
 
@@ -175,7 +183,7 @@ for epoch in range(total_epochs):
     progress_bar = tqdm(training_dataloader, leave = True)
     model_optimizer.zero_grad()
     for batch_idx, current_batch in enumerate(progress_bar):
-        batch = {k : v.to(torch.float16).to(device) if v.dtype == torch.float32 else v.to(device)
+        batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
                 for k, v in current_batch.items()}
 
         outputs = model(**batch)
