@@ -114,15 +114,3 @@ class ShaderDataset(Dataset):
         result["labels"] = labels
 
         return result
-
-
-        # text = self.processor.apply_chat_template(prompt_structure, tokenize=False, add_generation_prompt=False)
-        
-        # inputs = self.processor(
-            # text=text, 
-            # images=image, 
-            # padding=True, 
-            # return_tensors="pt"
-        # )
-# 
-        # return {k: v.squeeze(0) for k, v in inputs.items()}

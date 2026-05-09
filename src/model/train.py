@@ -1,4 +1,6 @@
 import os
+from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
+from peft import LoraConfig, get_peft_model
 from unsloth import FastVisionModel
 from unsloth.trainer import UnslothVisionDataCollator
 import torch.nn as nn
@@ -12,44 +14,6 @@ from functools import partial
 import wandb
 
 from .dataset import ShaderDataset
-
-# class TrainModel(nn.Module): 
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.model = None
-#         self.tokenizer = None 
-#         self.device = None
-
-#     def load_model(
-#             self,
-#             model_path: str = "unsloth/Qwen3.5-2B",
-#             load_in_4bit: bool = True,
-#             lora: bool = True,
-#             lora_layers: list[str] = ['vision', 'language'],
-#             max_seq_length: int = 2048
-#     ) -> None:
-        
-#         self.model, self.tokenizer = FastVisionModel.from_pretrained(
-#             model_name=model_path,
-#             load_in_4bit=load_in_4bit,
-#             use_gradient_checkpointing="unsloth",
-#             max_seq_length=max_seq_length,
-#         )
-
-#         if lora:
-#             self.model = FastVisionModel.get_peft_model(
-#                 self.model, 
-#                 finetune_vision_layers = "vision" in lora_layers,
-#                 finetune_language_layers = "language" in lora_layers,
-#                 finetune_attention_modules = "attention" in lora_layers,
-#                 finetune_mlp_modules = "mlp" in lora_layers,
-#                 r = 16,
-#                 lora_alpha = 16,
-#                 lora_dropout = 0,
-#                 bias = "none",
-#                 random_state = 3697,
-#                 use_rslora = True,
-#             )
 
 def shader_collate_fn(batch, pad_token_id = 0):
     """
@@ -79,6 +43,13 @@ def shader_collate_fn(batch, pad_token_id = 0):
 #################################
 #     log & save functions      #
 #################################
+
+wandb.init(project="TexGeneration", name="run_0.1", config = {
+    "epochs" : 5,
+    "batch_size" : 2,
+    "lr" : 5e-5
+})
+
 def log_metrics(epoch, iteration, loss):
     print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
     wandb.log({
@@ -110,36 +81,71 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, log_wandb):
     print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
 
-#################################
-#     Model & lora Loading      #
-#################################
+########################################
+#     Unsloth Model & lora Loading     #
+########################################
+
+#device = "cuda" if torch.cuda.is_available() else "cpu"
+#
+#model, processor = FastVisionModel.from_pretrained(
+#    model_name = "unsloth/Qwen3.5-2B",
+#    load_in_4bit = True,
+#    use_gradient_checkpointing = False,
+#    max_seq_length = 2048,
+#    dtype = torch.float16
+#)
+#
+## for param in model.parameters():
+##     param.requires_grad = False
+#
+#model = FastVisionModel.get_peft_model(
+#    model, 
+#    finetune_vision_layers = True,
+#    finetune_language_layers = True,
+#    finetune_attention_modules = True,
+#    finetune_mlp_modules = True,
+#    r = 16,
+#    lora_alpha = 16,
+#    lora_dropout = 0,
+#    bias = "none",
+#    random_state = 3697,
+#    use_rslora = True,
+#).to(device)
+#
+#model.print_trainable_parameters()
+
+#############################################
+#     Transformers Model & lora Loading     #
+#############################################
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model, processor = FastVisionModel.from_pretrained(
-    model_name = "unsloth/Qwen3.5-2B",
-    load_in_4bit = True,
-    use_gradient_checkpointing = "unsloth",
-    max_seq_length = 2048,
-    dtype = torch.float16
+precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
+model_name = "Qwen/Qwen3.5-2B"
+
+model = Qwen3_5ForConditionalGeneration.from_pretrained(
+    model_name,
+    torch_dtype=precision_type,
+    device_map="auto",
+)
+processor = AutoProcessor.from_pretrained(model_name)
+
+for param in model.parameters():
+    param.requires_grad = False
+
+model.gradient_checkpointing_enable()
+
+lora_config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+    lora_dropout=0.1,
+    bias="none",
+    use_rslora=True,
 )
 
-# for param in model.parameters():
-#     param.requires_grad = False
-
-model = FastVisionModel.get_peft_model(
-    model, 
-    finetune_vision_layers = True,
-    finetune_language_layers = True,
-    finetune_attention_modules = True,
-    finetune_mlp_modules = True,
-    r = 16,
-    lora_alpha = 16,
-    lora_dropout = 0,
-    bias = "none",
-    random_state = 3697,
-    use_rslora = True,
-).to(device)
-
+model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
 
 ############################
@@ -162,10 +168,6 @@ model_optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 total_epochs = 5
 ACCUMULATION_INTERVAL = 4
 
-wandb.init(project="TexGeneration", name="run_0.1", config = {
-    "epochs" : 5,
-    "batch_size" : 2
-})
 
 for epoch in range(total_epochs):
     model.train()
@@ -175,7 +177,6 @@ for epoch in range(total_epochs):
     for batch_idx, current_batch in enumerate(progress_bar):
         batch = {k : v.to(torch.float16).to(device) if v.dtype == torch.float32 else v.to(device)
                 for k, v in current_batch.items()}
-        # batch = {k : v.to(device) for k, v in current_batch.items()}
 
         outputs = model(**batch)
         batch_loss = outputs.loss
@@ -193,9 +194,6 @@ for epoch in range(total_epochs):
 
         if batch_idx % 5 == 0:
             log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
-
-        if batch_idx % 150 == 0:
-            save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, True)
 
     loss = loss / len(training_dataloader)
     print(f"total loss - {loss} after epochs - {total_epochs}")
