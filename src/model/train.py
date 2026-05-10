@@ -86,75 +86,77 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, log_wandb):
 #     Unsloth Model & lora Loading     #
 ########################################
 
-#device = "cuda" if torch.cuda.is_available() else "cpu"
-#
-#model, processor = FastVisionModel.from_pretrained(
-#    model_name = "unsloth/Qwen3.5-2B",
-#    load_in_4bit = True,
-#    use_gradient_checkpointing = False,
-#    max_seq_length = 2048,
-#    dtype = torch.float16
-#)
-#
-## for param in model.parameters():
-##     param.requires_grad = False
-#
-#model = FastVisionModel.get_peft_model(
-#    model, 
-#    finetune_vision_layers = True,
-#    finetune_language_layers = True,
-#    finetune_attention_modules = True,
-#    finetune_mlp_modules = True,
-#    r = 16,
-#    lora_alpha = 16,
-#    lora_dropout = 0,
-#    bias = "none",
-#    random_state = 3697,
-#    use_rslora = True,
-#).to(device)
-#
-#model.print_trainable_parameters()
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
+model, processor = FastVisionModel.from_pretrained(
+   model_name = "unsloth/Qwen3.5-2B",
+   load_in_4bit = True,
+   use_gradient_checkpointing = False,
+   max_seq_length = 2048,
+   dtype = precision_type
+)
+
+# for param in model.parameters():
+#     param.requires_grad = False
+
+model = FastVisionModel.get_peft_model(
+   model, 
+   finetune_vision_layers = True,
+   finetune_language_layers = True,
+   finetune_attention_modules = True,
+   finetune_mlp_modules = True,
+   r = 16,
+   lora_alpha = 16,
+   lora_dropout = 0,
+   bias = "none",
+   random_state = 3697,
+   use_rslora = True,
+).to(device)
+
+model.print_trainable_parameters()
 
 #############################################
 #     Transformers Model & lora Loading     #
 #############################################
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-
-model_name = "Qwen/Qwen3.5-2B"
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit = True,
-    bnb_4bit_compute_dtype = precision_type,
-    bnb_4bit_use_double_quant = True,
-    bnb_4bit_quant_type = "nf4"
-)
-model = Qwen3_5ForConditionalGeneration.from_pretrained(
-    model_name,
-    torch_dtype=precision_type,
-    device_map="auto",
-    quantization_config = bnb_config
-)
-processor = AutoProcessor.from_pretrained(model_name)
-
-for param in model.parameters():
-    param.requires_grad = False
-
-model.gradient_checkpointing_enable()
-
-lora_config = LoraConfig(
-    r=16,
-    lora_alpha=32,
-    target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-    lora_dropout=0.1,
-    bias="none",
-    use_rslora=True,
-)
-
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+# 
+# precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+# 
+# model_name = "Qwen/Qwen3.5-2B"
+# 
+# bnb_config = BitsAndBytesConfig(
+    # load_in_4bit = True,
+    # bnb_4bit_compute_dtype = precision_type,
+    # bnb_4bit_use_double_quant = True,
+    # bnb_4bit_quant_type = "nf4"
+# )
+# model = Qwen3_5ForConditionalGeneration.from_pretrained(
+    # model_name,
+    # torch_dtype=precision_type,
+    # device_map="auto",
+    # quantization_config = bnb_config
+# ).to(device)
+# processor = AutoProcessor.from_pretrained(model_name)
+# 
+# for param in model.parameters():
+    # param.requires_grad = False
+# 
+# model.gradient_checkpointing_enable()
+# 
+# lora_config = LoraConfig(
+    # r=16,
+    # lora_alpha=32,
+    # target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+    # lora_dropout=0.1,
+    # bias="none",
+    # use_rslora=True,
+# )
+# 
+# model = get_peft_model(model, lora_config)
+# model.print_trainable_parameters()
 
 ############################
 #     Dataset Loading      #
