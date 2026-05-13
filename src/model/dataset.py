@@ -57,7 +57,7 @@ class ShaderDataset(Dataset):
                      "Generate a text based shader graph in the following format -\n"
                      "N|node_name:node_type;...\n"
                      "P|node_name.property_path:value;...\n"
-                     "L|node_name.output_socket:node_name.input_socket;...\n"
+                     "L|node_name.output_socket>node_name.input_socket;...\n"
                      "Here N| represents nodes, P| tells properties & L| tells links."
                      )},
                 ]

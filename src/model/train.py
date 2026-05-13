@@ -1,9 +1,10 @@
 import os
+import unsloth
 from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 from peft import LoraConfig, get_peft_model
 from transformers import BitsAndBytesConfig
-# from unsloth import FastVisionModel
-# from unsloth.trainer import UnslothVisionDataCollator
+from unsloth import FastVisionModel
+from unsloth.trainer import UnslothVisionDataCollator
 import torch.nn as nn
 import torch
 from pathlib import Path

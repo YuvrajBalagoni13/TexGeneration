@@ -4,6 +4,7 @@ Dataset/
 past_dataset/
 grouptxt/
 material_dataset_filtered/
+model_ckpts/
 /Test.blend
 /Test.blend1
 /VLMaterial.pdf
