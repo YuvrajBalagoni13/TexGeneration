@@ -1,9 +1,13 @@
+import os
 import bpy
 import json 
 import ast
 from collections import defaultdict
 from tqdm.auto import tqdm
 from pathlib import Path
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 
 class TextShader:
     def __init__(self, nodes:list[str] = None, properties: list[str] = None, links:list[str] = None,dsl_text:str = None) -> None:
@@ -22,7 +26,8 @@ class TextShader:
         }
         self.temp_mat = None
         try:
-            with open("JSON_files/nodes_data_51.json", "r") as f:
+            print("PROJECT_ROOT:", PROJECT_ROOT)
+            with open(os.path.join(PROJECT_ROOT, "JSON_files", "nodes_data_51.json"), "r") as f:
                 self.check_valid_inputs = json.load(f)
         except:
             raise KeyError(f"JSON file not found.")

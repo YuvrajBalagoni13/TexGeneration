@@ -629,6 +629,9 @@ class ConvertCodeToDSL:
     def convert(self, python_path:str, text_path:str = None) -> str:
         """Optimized single file conversion"""
         # Reuse material across conversions
+        self.dsl_shader.reset()
+        self.dsl_shader.cleanup_material()
+
         self.dsl_shader.setup_material()
         nodes = self.dsl_shader.temp_mat.node_tree.nodes
         self.current_node_vartype_mapping = {}
@@ -650,6 +653,9 @@ class ConvertCodeToDSL:
                         
                         if node_type not in self.dsl_shader.available_node_types:
                             raise ValueError(f"{var_name} : {node_type} not available")
+                        
+                        if node_type == "Group":
+                            raise ValueError(f"found ShaderNodeGroup so skipping it ........")
                         
                         self.dsl_shader.nodes_info.append(f"{var_name}:{node_type}")
                         self.dsl_shader.current_node_dict[var_name] = nodes.new(f"ShaderNode{node_type}")
@@ -726,7 +732,7 @@ class ConvertCodeToDSL:
                                 for i in len(node.value.args):
                                     val.append(node.value.args[i].value)
 
-                            print(val)
+                            # print(val)
                             # Format value
                             if isinstance(val, str):
                                 val = f"'{val}'"

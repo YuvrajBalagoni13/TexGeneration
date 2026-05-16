@@ -29,8 +29,8 @@ def get_path_from_name(name, data_path):
 
 convert_code = dsl.ConvertCodeToDSL()
 
-dataset_path = Path("material_dataset_filtered/infinigen")
-data_save_folder = Path("Dataset")
+dataset_path = Path("material_dataset_filtered/mat_llm_r3")
+data_save_folder = Path("ShaderDataset")
 print("Starting conversion ...")
 
 with open("JSON_files/groups.json", "r") as f:

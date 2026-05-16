@@ -1,0 +1,3 @@
+N|material_output:OutputMaterial;principled_bsdf:BsdfPrincipled
+P|principled_bsdf.i-Base Color.dv:[0.189, 0.666, 0.483, 0.962];principled_bsdf.i-Metallic.dv:0.969;principled_bsdf.i-Roughness.dv:0.328;principled_bsdf.i-Emission Strength.dv:1.08;principled_bsdf.subsurface_method:'RANDOM_WALK_FIXED_RADIUS'
+L|principled_bsdf.BSDF>material_output.Surface

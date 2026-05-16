@@ -41,9 +41,10 @@ class Inference:
             inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
 
         text_streamer = TextStreamer(self.processor, skip_prompt = True)
-        output = self.model.generate(**inputs, streamer = text_streamer, max_new_tokens = 128,
-                   use_cache = True, temperature = 0.5, min_p = 0.1)
-        decoded = self.processor.decode(output[0], skip_special_tokens=True)
+        output = self.model.generate(**inputs, streamer = text_streamer, max_new_tokens = 1024,
+                   use_cache = True, do_sample = True, temperature = 0.5, min_p = 0.1)
+        input_length = inputs["input_ids"].shape[1]
+        decoded = self.processor.decode(output[0][input_length:], skip_special_tokens=True)
         return decoded
     
 
