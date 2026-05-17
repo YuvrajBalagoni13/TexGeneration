@@ -22,7 +22,7 @@ class ShaderDataset(Dataset):
         # getting a list of dictionaries for all image & text shader pair
         for style_dir in self.dataset_path.iterdir():
             if style_dir.is_dir():
-                images = list(style_dir.glob("*.jpg"))
+                images = list(style_dir.rglob("*.jpg"))
                 for image_path in images:
                     shader_path = image_path.with_suffix(".txt")
                     if shader_path.exists():

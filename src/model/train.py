@@ -1,7 +1,7 @@
 import os
 import unsloth
 from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 from transformers import BitsAndBytesConfig
 from unsloth import FastVisionModel
 from unsloth.trainer import UnslothVisionDataCollator
@@ -60,12 +60,25 @@ def log_metrics(epoch, iteration, loss):
         "train loss" : loss
     })
 
-def save_checkpoint(epoch, iteration, run_name, model, processor, log_wandb):
+def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, log_wandb):
     print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
-    checkpoint_directory = f"./texgen_{run_name}_{epoch + 1}_{iteration}"
+    checkpoint_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}"
+    resume_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}_state"
     os.makedirs(checkpoint_directory, exist_ok=True)
     model.save_pretrained(checkpoint_directory)
     processor.save_pretrained(checkpoint_directory)
+    os.makedirs(resume_directory, exist_ok=True)
+
+    torch.save(optimizer.state_dict(), os.path.join(resume_directory, "optimizer.pth"))
+
+    torch.save({
+        'epoch': epoch,
+        'iteration': iteration,
+        'run_name': run_name,
+    }, os.path.join(resume_directory, "training_state.pth"))
+
+    print(f"------ Checkpoint saved to {checkpoint_directory} ------")
+    print(f"------ Resume Checkpoint saved to {resume_directory} ------")
 
     if log_wandb:
         artifact = wandb.Artifact(
@@ -78,9 +91,27 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, log_wandb):
                 "run_name": run_name,
             }
         )
-        artifact.add_dir(checkpoint_directory)  
+        artifact.add_dir(f"ckpts_{run_name}_{epoch + 1}_{iteration}")  
         wandb.log_artifact(artifact)
     print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
+
+def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, optimizer_directory):
+    print(f"------ Loading checkpoint from {checkpoint_directory} ------")
+    
+    model = PeftModel.from_pretrained(base_model, checkpoint_directory)
+    processor = AutoProcessor.from_pretrained(checkpoint_directory)
+    
+    optimizer.load_state_dict(
+        torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
+        map_location='cuda')  
+    )
+    
+    state = torch.load(os.path.join(optimizer_directory, "training_state.pth"))
+    epoch = state['epoch']
+    iteration = state['iteration']
+    
+    print(f"------ Resumed from epoch {epoch + 1}, iteration {iteration} ------")
+    return model, processor, optimizer, epoch, iteration
 
 
 ########################################
@@ -95,7 +126,7 @@ model, processor = FastVisionModel.from_pretrained(
    model_name = "unsloth/Qwen3.5-2B",
    load_in_4bit = True,
    use_gradient_checkpointing = False,
-   max_seq_length = 2048,
+   max_seq_length = 1024,
    dtype = precision_type
 )
 
@@ -162,8 +193,8 @@ model.print_trainable_parameters()
 ############################
 #     Dataset Loading      #
 ############################
-training_dataset = ShaderDataset("Dataset/train", processor, max_seq_length=2048)
-testing_dataset = ShaderDataset("Dataset/infinigen", processor, max_seq_length=2048)
+training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=1024)
+testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=1024)
 
 # this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
 collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
@@ -176,11 +207,18 @@ testing_dataloader = DataLoader(testing_dataset, batch_size=2, shuffle=False, co
 #####################
 model_optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 
+ckpt_dir = ""
+state_dir = ""
+
+start_epoch = 0
+if ckpt_dir and state_dir:
+    model, processor, model_optimizer, start_epoch, batch_idx = load_checkpoint(model, processor, model_optimizer, ckpt_dir, state_dir)
+
 total_epochs = 5
 ACCUMULATION_INTERVAL = 4
 
 
-for epoch in range(total_epochs):
+for epoch in range(start_epoch, total_epochs):
     model.train()
     loss = 0
     progress_bar = tqdm(training_dataloader, leave = True)
@@ -206,6 +244,9 @@ for epoch in range(total_epochs):
         if batch_idx % 5 == 0:
             log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
 
+        if batch_idx % 250 == 0 and batch_idx != 0:
+            save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, True)
+
     loss = loss / len(training_dataloader)
     print(f"total loss - {loss} after epochs - {total_epochs}")
 
@@ -216,7 +257,7 @@ for epoch in range(total_epochs):
     eval_loss = 0
     with torch.no_grad():
         for eval_batch in tqdm(testing_dataloader):
-            batch = {k : v.to(torch.float16).to(device) if v.dtype == torch.float32 else v.to(device)
+            batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
                      for k, v in eval_batch.items()}
             
             eval_outputs = model(**batch)
@@ -231,5 +272,5 @@ for epoch in range(total_epochs):
 
         print(f"Epoch {epoch} | evaluation loss - {eval_loss}")
 
-    save_checkpoint(epoch, 0, wandb.run.name, model, processor, True)
+    save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
             
