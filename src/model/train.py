@@ -1,19 +1,17 @@
 import os
 import unsloth
-from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
+from transformers import AutoProcessor
 from peft import LoraConfig, get_peft_model, PeftModel
-from transformers import BitsAndBytesConfig
 from unsloth import FastVisionModel
-from unsloth.trainer import UnslothVisionDataCollator
 import torch.nn as nn
 import torch
 from pathlib import Path
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler
 from torch.nn.utils.rnn import pad_sequence
 from tqdm.auto import tqdm
 from functools import partial
 import wandb
+import argparse
 
 from .dataset import ShaderDataset
 
@@ -45,12 +43,6 @@ def shader_collate_fn(batch, pad_token_id = 0):
 #################################
 #     log & save functions      #
 #################################
-
-wandb.init(project="TexGeneration", name="run_0.1", config = {
-    "epochs" : 5,
-    "batch_size" : 2,
-    "lr" : 5e-5
-})
 
 def log_metrics(epoch, iteration, loss):
     print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
@@ -113,164 +105,139 @@ def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, opti
     print(f"------ Resumed from epoch {epoch + 1}, iteration {iteration} ------")
     return model, processor, optimizer, epoch, iteration
 
+def main(
+        run_name = "Qwen3.5_0.8B_run_2.0",
+        epochs = 5,
+        batch_size = 2,
+        lr = 1e-5,
+        lora_r = 32,
+        lora_alpha = 64,
+        gradient_accumulation = 8,
+        load_ckpt_dir = "",
+        load_state_dir = ""
 
-########################################
-#     Unsloth Model & lora Loading     #
-########################################
+) -> None:
+    wandb.init(project="TexGeneration", name=run_name, config = {
+        "epochs" : epochs,
+        "batch_size" : batch_size,
+        "lr" : lr,
+        "lora-r" : lora_r,
+        "lora-alpha" : lora_alpha,
+        "gradient accumulation" : gradient_accumulation
+    })
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+    ########################################
+    #     Unsloth Model & lora Loading     #
+    ########################################
 
-precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model, processor = FastVisionModel.from_pretrained(
-   model_name = "unsloth/Qwen3.5-2B",
-   load_in_4bit = True,
-   use_gradient_checkpointing = False,
-   max_seq_length = 1024,
-   dtype = precision_type
-)
+    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
 
-# for param in model.parameters():
-#     param.requires_grad = False
+    model, processor = FastVisionModel.from_pretrained(
+       model_name = "unsloth/Qwen3.5-0.8B",
+       load_in_4bit = True,
+       use_gradient_checkpointing = True,
+       max_seq_length = 1024,
+       dtype = precision_type
+    )
 
-model = FastVisionModel.get_peft_model(
-   model, 
-   finetune_vision_layers = True,
-   finetune_language_layers = True,
-   finetune_attention_modules = True,
-   finetune_mlp_modules = True,
-   r = 16,
-   lora_alpha = 16,
-   lora_dropout = 0,
-   bias = "none",
-   random_state = 3697,
-   use_rslora = True,
-).to(device)
+    model = FastVisionModel.get_peft_model(
+       model, 
+       finetune_vision_layers = True,
+       finetune_language_layers = True,
+       finetune_attention_modules = True,
+       finetune_mlp_modules = True,
+       r = lora_r,
+       lora_alpha = lora_alpha,
+       lora_dropout = 0,
+       bias = "none",
+       random_state = 3697,
+       use_rslora = True,
+    ).to(device)
 
-model.print_trainable_parameters()
+    model.print_trainable_parameters()
 
-#############################################
-#     Transformers Model & lora Loading     #
-#############################################
+    ############################
+    #     Dataset Loading      #
+    ############################
+    training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=1024)
+    testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=1024)
 
-# device = "cuda" if torch.cuda.is_available() else "cpu"
-# 
-# precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-# 
-# model_name = "Qwen/Qwen3.5-2B"
-# 
-# bnb_config = BitsAndBytesConfig(
-    # load_in_4bit = True,
-    # bnb_4bit_compute_dtype = precision_type,
-    # bnb_4bit_use_double_quant = True,
-    # bnb_4bit_quant_type = "nf4"
-# )
-# model = Qwen3_5ForConditionalGeneration.from_pretrained(
-    # model_name,
-    # torch_dtype=precision_type,
-    # device_map="auto",
-    # quantization_config = bnb_config
-# ).to(device)
-# processor = AutoProcessor.from_pretrained(model_name)
-# 
-# for param in model.parameters():
-    # param.requires_grad = False
-# 
-# model.gradient_checkpointing_enable()
-# 
-# lora_config = LoraConfig(
-    # r=16,
-    # lora_alpha=32,
-    # target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-    # lora_dropout=0.1,
-    # bias="none",
-    # use_rslora=True,
-# )
-# 
-# model = get_peft_model(model, lora_config)
-# model.print_trainable_parameters()
+    # this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
+    collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
-############################
-#     Dataset Loading      #
-############################
-training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=1024)
-testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=1024)
+    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    
+     ####################
+    #     Training      #
+    #####################
+    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-# this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
-collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
+    start_epoch = 0
+    if load_ckpt_dir and load_state_dir:
+        model, processor, model_optimizer, start_epoch, batch_idx = load_checkpoint(model, processor, model_optimizer, load_ckpt_dir, load_state_dir)
 
-training_dataloader = DataLoader(training_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
-testing_dataloader = DataLoader(testing_dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
- 
- ####################
-#     Training      #
-#####################
-model_optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-
-ckpt_dir = ""
-state_dir = ""
-
-start_epoch = 0
-if ckpt_dir and state_dir:
-    model, processor, model_optimizer, start_epoch, batch_idx = load_checkpoint(model, processor, model_optimizer, ckpt_dir, state_dir)
-
-total_epochs = 5
-ACCUMULATION_INTERVAL = 4
+    total_epochs = epochs
+    ACCUMULATION_INTERVAL = gradient_accumulation
 
 
-for epoch in range(start_epoch, total_epochs):
-    model.train()
-    loss = 0
-    progress_bar = tqdm(training_dataloader, leave = True)
-    model_optimizer.zero_grad()
-    for batch_idx, current_batch in enumerate(progress_bar):
-        batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
-                for k, v in current_batch.items()}
-
-        outputs = model(**batch)
-        batch_loss = outputs.loss
-
-        batch_loss = batch_loss / ACCUMULATION_INTERVAL
-        batch_loss.backward()
-
-        if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
-            model_optimizer.step()
-            model_optimizer.zero_grad()
-
-        loss += batch_loss.item() * ACCUMULATION_INTERVAL
-        progress_bar.set_postfix(loss = batch_loss.item() * ACCUMULATION_INTERVAL)
-
-        if batch_idx % 5 == 0:
-            log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
-
-        if batch_idx % 250 == 0 and batch_idx != 0:
-            save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, True)
-
-    loss = loss / len(training_dataloader)
-    print(f"total loss - {loss} after epochs - {total_epochs}")
-
-    #######################
-    #     Evaluation      #
-    #######################
-    model.eval()
-    eval_loss = 0
-    with torch.no_grad():
-        for eval_batch in tqdm(testing_dataloader):
+    for epoch in range(start_epoch, total_epochs):
+        model.train()
+        loss = 0
+        progress_bar = tqdm(training_dataloader, leave = True)
+        model_optimizer.zero_grad()
+        for batch_idx, current_batch in enumerate(progress_bar):
             batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
-                     for k, v in eval_batch.items()}
-            
-            eval_outputs = model(**batch)
-            eval_batch_loss = eval_outputs.loss
+                    for k, v in current_batch.items()}
 
-            eval_loss += eval_batch_loss.item()
+            outputs = model(**batch)
+            batch_loss = outputs.loss
 
-        wandb.log({
-            "epoch" : epoch,
-            "eval loss" : eval_loss / len(testing_dataloader)
-        })
+            batch_loss = batch_loss / ACCUMULATION_INTERVAL
+            batch_loss.backward()
 
-        print(f"Epoch {epoch} | evaluation loss - {eval_loss}")
+            if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
+                model_optimizer.step()
+                model_optimizer.zero_grad()
 
-    save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
-            
+            loss += batch_loss.item() * ACCUMULATION_INTERVAL
+            progress_bar.set_postfix(loss = batch_loss.item() * ACCUMULATION_INTERVAL)
+
+            if batch_idx % 5 == 0:
+                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
+
+            if batch_idx % 250 == 0 and batch_idx != 0:
+                save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, True)
+
+        loss = loss / len(training_dataloader)
+        print(f"total loss - {loss} after epochs - {total_epochs}")
+
+        #######################
+        #     Evaluation      #
+        #######################
+        model.eval()
+        eval_loss = 0
+        with torch.no_grad():
+            for eval_batch in tqdm(testing_dataloader):
+                batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
+                         for k, v in eval_batch.items()}
+
+                eval_outputs = model(**batch)
+                eval_batch_loss = eval_outputs.loss
+
+                eval_loss += eval_batch_loss.item()
+
+            wandb.log({
+                "epoch" : epoch,
+                "eval loss" : eval_loss / len(testing_dataloader)
+            })
+
+            print(f"Epoch {epoch} | evaluation loss - {eval_loss}")
+
+        save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
+
+if __name__ == "__main__":
+    main()
