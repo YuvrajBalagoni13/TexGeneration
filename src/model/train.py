@@ -12,8 +12,19 @@ from tqdm.auto import tqdm
 from functools import partial
 import wandb
 import argparse
+import random
+import numpy as np
 
 from .dataset import ShaderDataset
+
+def seed_everything(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ["PYTHONHASHSEED"] = str(seed)
 
 def shader_collate_fn(batch, pad_token_id = 0):
     """
@@ -114,9 +125,11 @@ def main(
         lora_alpha = 64,
         gradient_accumulation = 8,
         load_ckpt_dir = "",
-        load_state_dir = ""
+        load_state_dir = "",
+        seed = 42
 
 ) -> None:
+    seed_everything(seed)
     wandb.init(project="TexGeneration", name=run_name, config = {
         "epochs" : epochs,
         "batch_size" : batch_size,
@@ -167,8 +180,10 @@ def main(
     # this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
-    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    generator = torch.Generator()
+    generator.random_seed(seed)
+    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator)
+    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator)
     
      ####################
     #     Training      #
@@ -186,9 +201,8 @@ def main(
     for epoch in range(start_epoch, total_epochs):
         model.train()
         loss = 0
-        progress_bar = tqdm(training_dataloader, leave = True)
         model_optimizer.zero_grad()
-        for batch_idx, current_batch in enumerate(progress_bar):
+        for batch_idx, current_batch in tqdm(enumerate(training_dataloader)):
             batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
                     for k, v in current_batch.items()}
 
@@ -204,13 +218,12 @@ def main(
                 model_optimizer.zero_grad()
 
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
-            progress_bar.set_postfix(loss = batch_loss.item() * ACCUMULATION_INTERVAL)
 
             if batch_idx % 5 == 0:
                 log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
 
             if batch_idx % 250 == 0 and batch_idx != 0:
-                save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, True)
+                save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, True)
 
         loss = loss / len(training_dataloader)
         print(f"total loss - {loss} after epochs - {total_epochs}")
@@ -287,11 +300,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--load_ckpt_dir",
-        type=str
+        type=str,
+        default=""
     )
     parser.add_argument(
         "--load_state_dir",
-        type=str
+        type=str,
+        default=""
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42
     )
     args = parser.parse_args()
 
@@ -302,7 +322,10 @@ if __name__ == "__main__":
         lr = args.lr,
         lora_r = args.lora_r,
         lora_alpha = args.lora_alpha,
-        gradient_accumulation = args.gradient_accumulation
+        gradient_accumulation = args.gradient_accumulation,
+        load_ckpt_dir = args.load_ckpt_dir,
+        load_state_dir = args.load_state_dir,
+        seed = args.seed
     )
 
 """
