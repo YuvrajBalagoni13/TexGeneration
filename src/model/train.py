@@ -240,4 +240,78 @@ def main(
         save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    gradient_accumulation = 8,
+    load_ckpt_dir = "",
+    load_state_dir = ""
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default="Qwen3.5_0.8B_run_2.0"
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        required=True
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=2,
+        required=True
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-5,
+        required=True
+    )
+    parser.add_argument(
+        "--lora_r",
+        type=int,
+        default=32,
+        required=True
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=int,
+        default=64,
+        required=True
+    )
+    parser.add_argument(
+        "--gradient_accumulation",
+        type=int,
+        default=8,
+        required=True
+    )
+    parser.add_argument(
+        "--load_ckpt_dir",
+        type=str
+    )
+    parser.add_argument(
+        "--load_state_dir",
+        type=str
+    )
+    args = parser.parse_args()
+
+    main(
+        run_name = args.run_name,
+        epochs = args.epochs,
+        batch_size = args.batch_size,
+        lr = args.lr,
+        lora_r = args.lora_r,
+        lora_alpha = args.lora_alpha,
+        gradient_accumulation = args.gradient_accumulation
+    )
+
+"""
+python -m TexGeneration.src.model.train \
+--run_name Qwen3.5_0.8B_run_2.2 \
+--epochs 5 \
+--batch_size 2 \
+--lr 1e-5 \
+--lora_r 32 \
+--lora_alpha 64 \
+--gradient_accumulation 8 
+"""
