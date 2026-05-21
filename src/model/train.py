@@ -181,7 +181,7 @@ def main(
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
     generator = torch.Generator()
-    generator.random_seed(seed)
+    generator.manual_seed(seed)
     training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator)
     testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator)
     
@@ -192,7 +192,7 @@ def main(
 
     start_epoch = 0
     if load_ckpt_dir and load_state_dir:
-        model, processor, model_optimizer, start_epoch, batch_idx = load_checkpoint(model, processor, model_optimizer, load_ckpt_dir, load_state_dir)
+        model, processor, model_optimizer, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, load_ckpt_dir, load_state_dir)
 
     total_epochs = epochs
     ACCUMULATION_INTERVAL = gradient_accumulation
@@ -203,6 +203,10 @@ def main(
         loss = 0
         model_optimizer.zero_grad()
         for batch_idx, current_batch in tqdm(enumerate(training_dataloader)):
+
+            if batch_idx < start_batch_idx:
+                continue
+
             batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
                     for k, v in current_batch.items()}
 
