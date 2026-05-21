@@ -191,6 +191,7 @@ def main(
     model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     start_epoch = 0
+    start_batch_idx = 0
     if load_ckpt_dir and load_state_dir:
         model, processor, model_optimizer, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, load_ckpt_dir, load_state_dir)
 
