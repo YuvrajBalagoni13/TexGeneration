@@ -14,6 +14,7 @@ import wandb
 import argparse
 import random
 import numpy as np
+import json
 
 from .dataset import ShaderDataset
 
@@ -126,6 +127,8 @@ def main(
         gradient_accumulation = 8,
         load_ckpt_dir = "",
         load_state_dir = "",
+        add_new_tokens = False,
+        tokens_json_path = "",
         seed = 42
 
 ) -> None:
@@ -170,6 +173,42 @@ def main(
     ).to(device)
 
     model.print_trainable_parameters()
+
+    ##########################
+    #     Adding tokens      #
+    ##########################
+    if add_new_tokens:
+        with open(tokens_json_path, "r") as f:
+            tokens_dict = json.load(f)
+
+        old_vocab_length = len(processor.tokenizer)
+
+        processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
+        processor.tokenizer.add_special_tokens({
+            "additional_special_tokens" : tokens_dict["special_tokens"]
+        })
+        model.resize_token_embeddings(len(processor.tokenizer))
+
+        embeddings = model.get_input_embeddings().weight.data
+        new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+
+        for token in new_tokens_all:
+            token_id = processor.tokenizer.convert_tokens_to_ids(token)
+            subwords = processor.tokenizer.tokenize(token)
+            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+            if subwords_id:
+                avg = embeddings[subwords_id].mean(dim=0)
+                embeddings[token_id] = avg
+            
+            def freeze_old_embeddings_hook(grad):
+                grad[:old_vocab_length] = 0
+                return grad
+        
+        model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
+
+        print(f"Old vocab size: {old_vocab_length}")
+        print(f"New vocab size: {len(processor.tokenizer)}")
+        print(f"Added {len(processor.tokenizer) - old_vocab_length} new tokens")
 
     ############################
     #     Dataset Loading      #
@@ -314,6 +353,17 @@ if __name__ == "__main__":
         default=""
     )
     parser.add_argument(
+        "--add_new_tokens",
+        type=bool,
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--tokens_json_path",
+        type=str,
+        default=""
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42
@@ -330,6 +380,8 @@ if __name__ == "__main__":
         gradient_accumulation = args.gradient_accumulation,
         load_ckpt_dir = args.load_ckpt_dir,
         load_state_dir = args.load_state_dir,
+        add_new_tokens = args.add_new_tokens,
+        tokens_json_path = args.tokens_json_path,
         seed = args.seed
     )
 
@@ -341,5 +393,7 @@ python -m TexGeneration.src.model.train \
 --lr 1e-5 \
 --lora_r 32 \
 --lora_alpha 64 \
---gradient_accumulation 8 
+--gradient_accumulation 8 \
+--add_new_tokens \
+--tokens_json_path addition_tokens.json
 """
