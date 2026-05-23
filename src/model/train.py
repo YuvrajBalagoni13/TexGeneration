@@ -203,7 +203,8 @@ def main(
             def freeze_old_embeddings_hook(grad):
                 grad[:old_vocab_length] = 0
                 return grad
-        
+            
+        model.get_input_embeddings().weight.requires_grad_(True)
         model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
 
         print(f"Old vocab size: {old_vocab_length}")
@@ -354,7 +355,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--add_new_tokens",
-        type=bool,
         action="store_true",
         default=False
     )
