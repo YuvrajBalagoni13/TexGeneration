@@ -148,7 +148,7 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
 
     model, processor = FastVisionModel.from_pretrained(
        model_name = "unsloth/Qwen3.5-0.8B",
@@ -189,23 +189,23 @@ def main(
         })
         model.resize_token_embeddings(len(processor.tokenizer))
 
-        embeddings = model.get_input_embeddings().weight.data
-        new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-
-        for token in new_tokens_all:
-            token_id = processor.tokenizer.convert_tokens_to_ids(token)
-            subwords = processor.tokenizer.tokenize(token)
-            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
-            if subwords_id:
-                avg = embeddings[subwords_id].mean(dim=0)
-                embeddings[token_id] = avg
+        # embeddings = model.get_input_embeddings().weight.data
+        # new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+        
+        # for token in new_tokens_all:
+        #     token_id = processor.tokenizer.convert_tokens_to_ids(token)
+        #     subwords = processor.tokenizer.tokenize(token)
+        #     subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+        #     if subwords_id:
+        #         avg = embeddings[subwords_id].mean(dim=0)
+        #         embeddings[token_id] = avg
             
-            def freeze_old_embeddings_hook(grad):
-                grad[:old_vocab_length] = 0
-                return grad
-            
-        model.get_input_embeddings().weight.requires_grad_(True)
-        model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
+        # def freeze_old_embeddings_hook(grad):
+        #     grad[:old_vocab_length] = 0
+        #     return grad
+        
+        # model.get_input_embeddings().weight.requires_grad_(True)
+        # model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
 
         print(f"Old vocab size: {old_vocab_length}")
         print(f"New vocab size: {len(processor.tokenizer)}")
@@ -238,7 +238,7 @@ def main(
     total_epochs = epochs
     ACCUMULATION_INTERVAL = gradient_accumulation
 
-
+    int_keys = {"input_ids", "attention_mask", "labels", "image_grid_thw", "mm_token_type_ids"}
     for epoch in range(start_epoch, total_epochs):
         model.train()
         loss = 0
@@ -248,7 +248,7 @@ def main(
             if batch_idx < start_batch_idx:
                 continue
 
-            batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
+            batch = {k : v.to(precision_type).to(device) if k not in int_keys else v.to(device)
                     for k, v in current_batch.items()}
 
             outputs = model(**batch)
@@ -258,7 +258,7 @@ def main(
             batch_loss.backward()
 
             if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
                 model_optimizer.step()
                 model_optimizer.zero_grad()
 
@@ -280,7 +280,7 @@ def main(
         eval_loss = 0
         with torch.no_grad():
             for eval_batch in tqdm(testing_dataloader):
-                batch = {k : v.to(precision_type).to(device) if v.dtype == torch.float32 else v.to(device)
+                batch = {k : v.to(precision_type).to(device) if k not in int_keys else v.to(device)
                          for k, v in eval_batch.items()}
 
                 eval_outputs = model(**batch)
