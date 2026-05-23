@@ -181,7 +181,7 @@ def main(
         with open(tokens_json_path, "r") as f:
             tokens_dict = json.load(f)
 
-        old_vocab_length = len(processor.tokenizer)
+        old_vocab_size = len(processor.tokenizer)
 
         processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
         processor.tokenizer.add_special_tokens({
@@ -189,6 +189,29 @@ def main(
         })
         model.resize_token_embeddings(len(processor.tokenizer))
 
+        input_embeddings = model.get_input_embeddings()
+        output_embeddings = model.get_output_embeddings()
+
+        with torch.no_grad():
+            mean_in = input_embeddings.weight[:old_vocab_size].mean(dim=0)
+            mean_out = output_embeddings.weight[:old_vocab_size].mean(dim=0)
+
+            input_embeddings.weight[old_vocab_size:] = mean_in
+            output_embeddings.weight[old_vocab_size:] = mean_out
+
+        def freeze_old_input_grads(grad):
+            grad[:old_vocab_size] = 0
+            return grad
+        
+        def freeze_old_output_grads(grad):
+            grad[:old_vocab_size] = 0
+            return grad
+        
+        input_embeddings.weight.register_hook(freeze_old_input_grads)
+        output_embeddings.weight.register_hook(freeze_old_input_grads)
+
+        input_embeddings.to(precision_type)
+        output_embeddings.to(precision_type)
         # embeddings = model.get_input_embeddings().weight.data
         # new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
         
@@ -207,9 +230,9 @@ def main(
         # model.get_input_embeddings().weight.requires_grad_(True)
         # model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
 
-        print(f"Old vocab size: {old_vocab_length}")
+        print(f"Old vocab size: {old_vocab_size}")
         print(f"New vocab size: {len(processor.tokenizer)}")
-        print(f"Added {len(processor.tokenizer) - old_vocab_length} new tokens")
+        print(f"Added {len(processor.tokenizer) - old_vocab_size} new tokens")
 
     ############################
     #     Dataset Loading      #
@@ -228,7 +251,29 @@ def main(
      ####################
     #     Training      #
     #####################
-    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    # model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    embedding_params = []
+    other_params = []
+
+    for name, param in model.named_parameters():
+        if "embed_tokens" in name or "lm_head" in name:
+            embedding_params.append(param)
+        else:
+            other_params.append(param)
+    
+    model_optimizer = torch.optim.AdamW([
+        {
+            "params": other_params,
+            "lr": lr
+        },
+        {
+            "params": embedding_params,
+            "lr": lr * 0.05,
+        }
+    ],
+    betas=(0.9, 0.95),
+    weight_decay = 0.01
+    )
 
     start_epoch = 0
     start_batch_idx = 0
@@ -258,7 +303,9 @@ def main(
             batch_loss.backward()
 
             if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
+                total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
+                if torch.isnan(total_norm):
+                    raise RuntimeError(f"Got NAN Gradients..")
                 model_optimizer.step()
                 model_optimizer.zero_grad()
 
