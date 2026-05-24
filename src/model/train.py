@@ -25,20 +25,24 @@ class NewTokenEmbeddings(nn.Module):
             self, 
             old_embeddings : nn.Embedding = None,
             embed_dim : int = 1024,
+            old_vocab_size : int = 248077,
             tokenizer : any = None,
             mean_subwords: bool = False,
             subwords_id_list : list = None,
             new_tokens : list = None
         ) -> None:
+        super().__init__()
         self.embed_dim = embed_dim
         self.old_embeddings = old_embeddings # [248077, 1024]
-        self.old_vocab_size = self.old_embeddings.weight.size[0]
+        self.old_vocab_size = old_vocab_size
         self.old_embeddings.requires_grad_(False)
 
         self.num_new_tokens = len(new_tokens)
-        self.new_embeddings = nn.Embedding(self.num_new_tokens, embed_dim) # [233, 1024]
+        self.new_embeddings = nn.Embedding(self.num_new_tokens, embed_dim) # [237, 1024]
+        print(f"old vocab size - {self.old_vocab_size}")
+        print(f"new token size - {self.num_new_tokens}")
 
-        with torch.no_grad:
+        with torch.no_grad():
             if mean_subwords:
                 if not subwords_id_list:
                     raise ValueError(f"not subwords id list given ...")
@@ -57,8 +61,7 @@ class NewTokenEmbeddings(nn.Module):
         new_mask = ~old_mask
 
         output = torch.zeros(
-            input_ids.shape,
-            self.embed_dim,
+            (*input_ids.shape, self.embed_dim),
             device = input_ids.device,
             dtype = self.old_embeddings.weight.dtype
         )
@@ -69,6 +72,47 @@ class NewTokenEmbeddings(nn.Module):
             output[new_mask] = self.new_embeddings(new_ids)
         return output
     
+class NewTokenOutput(nn.Module):
+    def __init__(
+            self, 
+            old_lm_head : nn.Linear = None,
+            embed_dim : int = 1024,
+            old_vocab_size : int = 248077,
+            tokenizer : any = None,
+            mean_subwords: bool = False,
+            subwords_id_list : list = None,
+            new_tokens : list = None
+    ) -> None:
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.old_lm_head = old_lm_head
+        self.old_vocab_size = old_vocab_size
+        self.old_lm_head.requires_grad_(True)
+
+        self.num_new_tokens = len(new_tokens)
+        self.new_lm_head = nn.Linear(embed_dim, self.num_new_tokens, bias = False)
+
+        with torch.no_grad():
+            if mean_subwords:
+                if not subwords_id_list:
+                    raise ValueError(f"not subwords id list given ...")
+                for i, token in enumerate(new_tokens):
+                    token_id = tokenizer.convert_tokens_to_ids(token)
+                    avg = self.old_lm_head.weight[subwords_id_list[i]].mean(dim=0)
+                    self.new_lm_head.weight[token_id - self.old_vocab_size] = avg
+            else:
+                avg = self.old_lm_head.weight.mean(dim=0)
+                for i, token in enumerate(new_tokens):
+                    token_id = tokenizer.convert_tokens_to_ids(token)
+                    self.new_lm_head.weight[token_id - self.old_vocab_size] = avg
+            
+    
+    def forward(self, hidden_states):
+        # hidden_states - [batch_size, seq_len, 1024]
+        old_token_logits = self.old_lm_head(hidden_states)  # [batch_size, seq_len, 248077]
+        new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 237]
+        logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248314]
+        return logits
 
 # -- seed & collate functions ---------------------- #
 
@@ -214,11 +258,13 @@ def main(
     for params in model.parameters():
         params.requires_grad_(False)
 
-    # -- Get Embeddings --------------------- #
+    # -- Get Input Embeddings & LM Head --------------------- #
 
     if add_new_tokens:
         with open(tokens_json_path, "r") as f:
             tokens_dict = json.load(f)
+
+        old_vocab_size = len(processor.tokenizer)
 
         new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
         subwords_id_list = []
@@ -232,16 +278,35 @@ def main(
             "additional_special_tokens" : tokens_dict["special_tokens"]
         })
 
+        # untying the weights
+        model.lm_head.weight = nn.Parameter(
+            model.get_output_embeddings().weight.clone()
+        )
+
         input_embeddings = model.get_input_embeddings()
+        output_lm_head = model.get_output_embeddings()
+
         new_embedding_layer = NewTokenEmbeddings(
             old_embeddings = input_embeddings,
+            old_vocab_size = old_vocab_size,
             embed_dim = 1024,
             tokenizer = processor.tokenizer,
             mean_subwords = True,
             subwords_id_list = subwords_id_list,
             new_tokens = new_tokens
         )
+        new_lm_head = NewTokenOutput(
+            old_lm_head = output_lm_head,
+            embed_dim = 1024,
+            old_vocab_size = old_vocab_size,
+            tokenizer = processor.tokenizer,
+            mean_subwords = True,
+            subwords_id_list = subwords_id_list,
+            new_tokens = new_tokens
+        )
+
         model.set_input_embeddings(new_embedding_layer)
+        model.set_output_embeddings(new_lm_head)
 
     # -- Not Important ---------------------- #
     ##########################
@@ -411,7 +476,7 @@ def main(
         print(f"total loss - {loss} after epochs - {total_epochs}")
 
         # -- Evaluation ------------------------ #
-        
+
         model.eval()
         eval_loss = 0
         with torch.no_grad():
