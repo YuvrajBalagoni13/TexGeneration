@@ -1,7 +1,9 @@
 import os
+# import unsloth
 from transformers import AutoProcessor
 from transformers import Qwen3_5ForConditionalGeneration, Qwen3_5Config
 from peft import LoraConfig, get_peft_model, PeftModel
+# from unsloth import FastVisionModel
 import torch.nn as nn
 import torch
 from pathlib import Path
@@ -17,60 +19,6 @@ import json
 from torch.amp import autocast, GradScaler
 
 from .dataset import ShaderDataset
-
-# -- Custom Embedding classes ---------------------- #
-
-class NewTokenEmbeddings(nn.Module):
-    def __init__(
-            self, 
-            old_embeddings : nn.Embedding = None,
-            embed_dim : int = 1024,
-            tokenizer : any = None,
-            mean_subwords: bool = False,
-            subwords_id_list : list = None,
-            new_tokens : list = None
-        ) -> None:
-        self.embed_dim = embed_dim
-        self.old_embeddings = old_embeddings # [248077, 1024]
-        self.old_vocab_size = self.old_embeddings.weight.size[0]
-        self.old_embeddings.requires_grad_(False)
-
-        self.num_new_tokens = len(new_tokens)
-        self.new_embeddings = nn.Embedding(self.num_new_tokens, embed_dim) # [233, 1024]
-
-        with torch.no_grad:
-            if mean_subwords:
-                if not subwords_id_list:
-                    raise ValueError(f"not subwords id list given ...")
-                for i, token in enumerate(new_tokens):
-                    token_id = tokenizer.convert_tokens_to_ids(token)
-                    avg = self.old_embeddings.weight[subwords_id_list[i]].mean(dim=0)
-                    self.new_embeddings.weight[token_id - self.old_vocab_size] = avg
-            else:
-                avg = self.old_embeddings.weight.mean(dim=0)
-                for i, token in enumerate(new_tokens):
-                    token_id = tokenizer.convert_tokens_to_ids(token)
-                    self.new_embeddings.weight[token_id - self.old_vocab_size] = avg
-
-    def forward(self, input_ids):
-        old_mask = (input_ids < self.old_vocab_size)
-        new_mask = ~old_mask
-
-        output = torch.zeros(
-            input_ids.shape,
-            self.embed_dim,
-            device = input_ids.device,
-            dtype = self.old_embeddings.weight.dtype
-        )
-        if old_mask.any():
-            output[old_mask] = self.old_embeddings(input_ids[old_mask])
-        if new_mask.any():
-            new_ids = input_ids[new_mask] - self.old_vocab_size
-            output[new_mask] = self.new_embeddings(new_ids)
-        return output
-    
-
-# -- seed & collate functions ---------------------- #
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -105,7 +53,10 @@ def shader_collate_fn(batch, pad_token_id = 0):
     
     return result
 
-# -- log & save functions ---------------------- #
+
+#################################
+#     log & save functions      #
+#################################
 
 def log_metrics(epoch, iteration, loss):
     print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
@@ -170,7 +121,6 @@ def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, opti
 
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
-        quantize = False,
         epochs = 5,
         batch_size = 2,
         lr = 1e-5,
@@ -195,105 +145,97 @@ def main(
         "gradient accumulation" : gradient_accumulation
     })
 
-   # -- Model Loading ------------------------ #
+    ########################################
+    #     Unsloth Model & lora Loading     #
+    ########################################
+
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    # print(f"precision type : {precision_type}")
+    # model, processor = FastVisionModel.from_pretrained(
+    #    model_name = "unsloth/Qwen3.5-0.8B",
+    #    load_in_4bit = False,
+    #    use_gradient_checkpointing = True,
+    #    max_seq_length = 1024,
+    #   #  dtype = precision_type
+    # )
+    # model_precision_type = next(model.parameters()).dtype
+    # print(f"Model dtype: {model_precision_type}") 
+
+    ########################################
+    #      custom Model & lora Loading     #
+    ########################################
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
     precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    # precision_type = torch.float16
+    print(f"precision type : {precision_type}")
 
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
         "Qwen/Qwen3.5-0.8B",
-        torch_dtype = precision_type,
-        device_map = device
+        torch_dtype=precision_type,
+        device_map=device
     )
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen3.5-0.8B")
+    processor = AutoProcessor.from_pretrained(
+      "Qwen/Qwen3.5-0.8B"
+    )
 
-    precision_type = next(model.parameters()).dtype
-    print(f"Model dtype: {precision_type}") 
+    model_precision_type = next(model.parameters()).dtype
+    print(f"Model dtype: {model_precision_type}")
 
-    for params in model.parameters():
-        params.requires_grad_(False)
-
-    # -- Get Embeddings --------------------- #
-
+    for param in model.parameters():
+      param.requires_grad_(False)
+    ##########################
+    #     Adding tokens      #
+    ##########################
     if add_new_tokens:
         with open(tokens_json_path, "r") as f:
             tokens_dict = json.load(f)
 
-        new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+        old_vocab_size = len(processor.tokenizer)
+
+        tokens_list = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
         subwords_id_list = []
-        for token in new_tokens:
+        for token in tokens_list:
             subwords = processor.tokenizer.tokenize(token)
             subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
             subwords_id_list.append(subwords_id)
-        
+
         processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
         processor.tokenizer.add_special_tokens({
             "additional_special_tokens" : tokens_dict["special_tokens"]
         })
+        model.resize_token_embeddings(len(processor.tokenizer))
 
         input_embeddings = model.get_input_embeddings()
-        new_embedding_layer = NewTokenEmbeddings(
-            old_embeddings = input_embeddings,
-            embed_dim = 1024,
-            tokenizer = processor.tokenizer,
-            mean_subwords = True,
-            subwords_id_list = subwords_id_list,
-            new_tokens = new_tokens
-        )
-        model.set_input_embeddings(new_embedding_layer)
+        output_embeddings = model.get_output_embeddings()
 
-    # -- Not Important ---------------------- #
-    ##########################
-    #     Adding tokens      #
-    ##########################
-    # if add_new_tokens:
-    #     with open(tokens_json_path, "r") as f:
-    #         tokens_dict = json.load(f)
+        with torch.no_grad():
+            for i, token in enumerate(tokens_list):
+                token_id = processor.tokenizer.convert_tokens_to_ids(token)
+                mean_in = input_embeddings.weight[subwords_id_list[i]].mean(dim=0)
+                mean_out = output_embeddings.weight[subwords_id_list[i]].mean(dim=0)
 
-    #     old_vocab_size = len(processor.tokenizer)
+                input_embeddings.weight[token_id] = mean_in
+                output_embeddings.weight[token_id] = mean_out
 
-    #     tokens_list = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-    #     subwords_id_list = []
-    #     for token in tokens_list:
-    #         subwords = processor.tokenizer.tokenize(token)
-    #         subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
-    #         subwords_id_list.append(subwords_id)
-
-    #     processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
-    #     processor.tokenizer.add_special_tokens({
-    #         "additional_special_tokens" : tokens_dict["special_tokens"]
-    #     })
-    #     model.resize_token_embeddings(len(processor.tokenizer))
-
-    #     input_embeddings = model.get_input_embeddings()
-    #     output_embeddings = model.get_output_embeddings()
-
-    #     with torch.no_grad():
-    #         for i, token in enumerate(tokens_list):
-    #             token_id = processor.tokenizer.convert_tokens_to_ids(token)
-    #             mean_in = input_embeddings.weight[subwords_id_list[i]].mean(dim=0)
-    #             mean_out = output_embeddings.weight[subwords_id_list[i]].mean(dim=0)
-
-    #             input_embeddings.weight[token_id] = mean_in
-    #             output_embeddings.weight[token_id] = mean_out
-
-    #     def freeze_old_input_grads(grad):
-    #         grad[:old_vocab_size] = 0
-    #         return grad
+        def freeze_old_input_grads(grad):
+            grad[:old_vocab_size] = 0
+            return grad
         
-    #     def freeze_old_output_grads(grad):
-    #         grad[:old_vocab_size] = 0
-    #         return grad
+        def freeze_old_output_grads(grad):
+            grad[:old_vocab_size] = 0
+            return grad
         
-    #     input_embeddings.requires_grad_(True)
-    #     output_embeddings.requires_grad_(True)
+        input_embeddings.requires_grad_(True)
+        output_embeddings.requires_grad_(True)
 
-    #     input_embeddings.weight.register_hook(freeze_old_input_grads)
-    #     output_embeddings.weight.register_hook(freeze_old_input_grads)
+        input_embeddings.weight.register_hook(freeze_old_input_grads)
+        output_embeddings.weight.register_hook(freeze_old_input_grads)
 
-    #     input_embeddings.to(precision_type)
-    #     output_embeddings.to(precision_type)
+        input_embeddings.to(model_precision_type)
+        output_embeddings.to(model_precision_type)
         # embeddings = model.get_input_embeddings().weight.data
         # new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
         
@@ -312,9 +254,9 @@ def main(
         # model.get_input_embeddings().weight.requires_grad_(True)
         # model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
 
-        # print(f"Old vocab size: {old_vocab_size}")
-        # print(f"New vocab size: {len(processor.tokenizer)}")
-        # print(f"Added {len(processor.tokenizer) - old_vocab_size} new tokens")
+        print(f"Old vocab size: {old_vocab_size}")
+        print(f"New vocab size: {len(processor.tokenizer)}")
+        print(f"Added {len(processor.tokenizer) - old_vocab_size} new tokens")
 
     #########################
     #     lora Loading      #
@@ -340,8 +282,9 @@ def main(
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
 
-    # -- Dataset Loading ------------------------- #
-
+    ############################
+    #     Dataset Loading      #
+    ############################
     training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=1024)
     testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=1024)
 
@@ -353,10 +296,17 @@ def main(
     training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator)
     testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator)
     
-    # -- Training ------------------------------- #
-
-    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-
+     ####################
+    #     Training      #
+    #####################
+    if add_new_tokens:
+        model_optimizer = torch.optim.AdamW(
+          [p for p in model.parameters() if p.requires_grad],
+          lr = lr
+        )
+    else:
+        model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    model.gradient_checkpointing_enable()
     scaler = GradScaler()
 
     start_epoch = 0
@@ -380,23 +330,24 @@ def main(
             batch = {k : v.to(device)
                     for k, v in current_batch.items()}
 
-            with autocast('cuda', dtype=precision_type):
+            with autocast('dtype=torch.float16, enabled=True):
                 outputs = model(**batch)
                 batch_loss = outputs.loss
-                batch_loss = batch_loss / ACCUMULATION_INTERVAL
 
+                batch_loss = batch_loss / ACCUMULATION_INTERVAL
             scaler.scale(batch_loss).backward()
 
             if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
                 scaler.unscale_(model_optimizer)
                 total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
-                if torch.isnan(total_norm):
+                if torch.isnan(total_norm) or torch.isinf(total_norm):
                     print(f"Got NAN Gradients, Skipping step ...")
                     scaler.update()
                     model_optimizer.zero_grad()
                     continue
                 scaler.step(model_optimizer)
-                model_optimizer.step()
+                scaler.update() 
+                # model_optimizer.step()
                 model_optimizer.zero_grad()
 
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
@@ -410,8 +361,9 @@ def main(
         loss = loss / len(training_dataloader)
         print(f"total loss - {loss} after epochs - {total_epochs}")
 
-        # -- Evaluation ------------------------ #
-        
+        #######################
+        #     Evaluation      #
+        #######################
         model.eval()
         eval_loss = 0
         with torch.no_grad():
@@ -442,11 +394,6 @@ if __name__ == "__main__":
         "--run_name",
         type=str,
         default="Qwen3.5_0.8B_run_2.0"
-    )
-    parser.add_argument(
-        "--quantize",
-        action="store_true",
-        default=False
     )
     parser.add_argument(
         "--epochs",
@@ -516,7 +463,6 @@ if __name__ == "__main__":
 
     main(
         run_name = args.run_name,
-        quantize = args.quantize,
         epochs = args.epochs,
         batch_size = args.batch_size,
         lr = args.lr,
@@ -534,7 +480,6 @@ if __name__ == "__main__":
 """
 python -m TexGeneration.src.model.train \
 --run_name Qwen3.5_0.8B_run_2.2 \
---quantize \
 --epochs 5 \
 --batch_size 2 \
 --lr 1e-5 \
