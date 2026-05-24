@@ -87,7 +87,7 @@ class NewTokenOutput(nn.Module):
         self.embed_dim = embed_dim
         self.old_lm_head = old_lm_head
         self.old_vocab_size = old_vocab_size
-        self.old_lm_head.requires_grad_(True)
+        self.old_lm_head.requires_grad_(False)
 
         self.num_new_tokens = len(new_tokens)
         self.new_lm_head = nn.Linear(embed_dim, self.num_new_tokens, bias = False)
@@ -230,14 +230,7 @@ def main(
 
 ) -> None:
     seed_everything(seed)
-    wandb.init(project="TexGeneration", name=run_name, config = {
-        "epochs" : epochs,
-        "batch_size" : batch_size,
-        "lr" : lr,
-        "lora-r" : lora_r,
-        "lora-alpha" : lora_alpha,
-        "gradient accumulation" : gradient_accumulation
-    })
+    
 
    # -- Model Loading ------------------------ #
 
@@ -431,6 +424,15 @@ def main(
 
     total_epochs = epochs
     ACCUMULATION_INTERVAL = gradient_accumulation
+
+    wandb.init(project="TexGeneration", name=run_name, config = {
+        "epochs" : epochs,
+        "batch_size" : batch_size,
+        "lr" : lr,
+        "lora-r" : lora_r,
+        "lora-alpha" : lora_alpha,
+        "gradient accumulation" : gradient_accumulation
+    })
 
     int_keys = {"input_ids", "attention_mask", "labels", "image_grid_thw", "mm_token_type_ids"}
     for epoch in range(start_epoch, total_epochs):
