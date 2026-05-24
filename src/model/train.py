@@ -15,6 +15,7 @@ import argparse
 import random
 import numpy as np
 import json
+from torch.cuda.amp import autocast, GradScaler
 
 from .dataset import ShaderDataset
 
@@ -156,8 +157,10 @@ def main(
        load_in_4bit = True,
        use_gradient_checkpointing = True,
        max_seq_length = 1024,
-       dtype = precision_type
+    #    dtype = precision_type
     )
+    precision_type = next(model.parameters()).dtype
+    print(f"Model dtype: {precision_type}") 
 
     ##########################
     #     Adding tokens      #
@@ -201,6 +204,9 @@ def main(
             grad[:old_vocab_size] = 0
             return grad
         
+        input_embeddings.requires_grad_(True)
+        output_embeddings.requires_grad_(True)
+
         input_embeddings.weight.register_hook(freeze_old_input_grads)
         output_embeddings.weight.register_hook(freeze_old_input_grads)
 
@@ -247,7 +253,10 @@ def main(
            use_rslora = True,
         ).to(device)
 
-    model.print_trainable_parameters()
+    # model.print_trainable_parameters()
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
 
     ############################
     #     Dataset Loading      #
@@ -292,6 +301,7 @@ def main(
     else:
         model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
+    scaler = GradScaler()
 
     start_epoch = 0
     start_batch_idx = 0
@@ -314,16 +324,22 @@ def main(
             batch = {k : v.to(precision_type).to(device) if k not in int_keys else v.to(device)
                     for k, v in current_batch.items()}
 
-            outputs = model(**batch)
-            batch_loss = outputs.loss
+            with autocast(dtype=precision_type):
+                outputs = model(**batch)
+                batch_loss = outputs.loss
 
-            batch_loss = batch_loss / ACCUMULATION_INTERVAL
-            batch_loss.backward()
+                batch_loss = batch_loss / ACCUMULATION_INTERVAL
+            scaler.scale(batch_loss).backward()
 
             if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
+                scaler.unscale(model_optimizer)
                 total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
                 if torch.isnan(total_norm):
-                    raise RuntimeError(f"Got NAN Gradients..")
+                    print(f"Got NAN Gradients, Skipping step ...")
+                    scaler.update()
+                    model_optimizer.zero_grad()
+                    continue
+                scaler.step(model_optimizer)
                 model_optimizer.step()
                 model_optimizer.zero_grad()
 
