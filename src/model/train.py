@@ -122,6 +122,7 @@ def main(
         epochs = 5,
         batch_size = 2,
         lr = 1e-5,
+        lora = True,
         lora_r = 32,
         lora_alpha = 64,
         gradient_accumulation = 8,
@@ -158,22 +159,6 @@ def main(
        dtype = precision_type
     )
 
-    model = FastVisionModel.get_peft_model(
-       model, 
-       finetune_vision_layers = True,
-       finetune_language_layers = True,
-       finetune_attention_modules = True,
-       finetune_mlp_modules = True,
-       r = lora_r,
-       lora_alpha = lora_alpha,
-       lora_dropout = 0,
-       bias = "none",
-       random_state = 3697,
-       use_rslora = True,
-    ).to(device)
-
-    model.print_trainable_parameters()
-
     ##########################
     #     Adding tokens      #
     ##########################
@@ -182,6 +167,13 @@ def main(
             tokens_dict = json.load(f)
 
         old_vocab_size = len(processor.tokenizer)
+
+        tokens_list = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+        subwords_id_list = []
+        for token in tokens_list:
+            subwords = processor.tokenizer.tokenize(token)
+            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+            subwords_id_list.append(subwords_id)
 
         processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
         processor.tokenizer.add_special_tokens({
@@ -193,11 +185,13 @@ def main(
         output_embeddings = model.get_output_embeddings()
 
         with torch.no_grad():
-            mean_in = input_embeddings.weight[:old_vocab_size].mean(dim=0)
-            mean_out = output_embeddings.weight[:old_vocab_size].mean(dim=0)
+            for i, token in enumerate(tokens_list):
+                token_id = processor.tokenizer.convert_tokens_to_ids(token)
+                mean_in = input_embeddings.weight[subwords_id_list[i]].mean(dim=0)
+                mean_out = output_embeddings.weight[subwords_id_list[i]].mean(dim=0)
 
-            input_embeddings.weight[old_vocab_size:] = mean_in
-            output_embeddings.weight[old_vocab_size:] = mean_out
+                input_embeddings.weight[token_id] = mean_in
+                output_embeddings.weight[token_id] = mean_out
 
         def freeze_old_input_grads(grad):
             grad[:old_vocab_size] = 0
@@ -234,6 +228,27 @@ def main(
         print(f"New vocab size: {len(processor.tokenizer)}")
         print(f"Added {len(processor.tokenizer) - old_vocab_size} new tokens")
 
+    #########################
+    #     lora Loading      #
+    #########################
+
+    if lora:
+        model = FastVisionModel.get_peft_model(
+           model, 
+           finetune_vision_layers = True,
+           finetune_language_layers = True,
+           finetune_attention_modules = True,
+           finetune_mlp_modules = True,
+           r = lora_r,
+           lora_alpha = lora_alpha,
+           lora_dropout = 0,
+           bias = "none",
+           random_state = 3697,
+           use_rslora = True,
+        ).to(device)
+
+    model.print_trainable_parameters()
+
     ############################
     #     Dataset Loading      #
     ############################
@@ -251,29 +266,32 @@ def main(
      ####################
     #     Training      #
     #####################
-    # model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    embedding_params = []
-    other_params = []
+    if add_new_tokens:
+        embedding_params = []
+        other_params = []
 
-    for name, param in model.named_parameters():
-        if "embed_tokens" in name or "lm_head" in name:
-            embedding_params.append(param)
-        else:
-            other_params.append(param)
-    
-    model_optimizer = torch.optim.AdamW([
-        {
-            "params": other_params,
-            "lr": lr
-        },
-        {
-            "params": embedding_params,
-            "lr": lr * 0.05,
-        }
-    ],
-    betas=(0.9, 0.95),
-    weight_decay = 0.01
-    )
+        for name, param in model.named_parameters():
+            if "embed_tokens" in name or "lm_head" in name:
+                embedding_params.append(param)
+            else:
+                other_params.append(param)
+
+        model_optimizer = torch.optim.AdamW([
+            {
+                "params": other_params,
+                "lr": lr
+            },
+            {
+                "params": embedding_params,
+                "lr": lr * 0.05,
+            }
+        ],
+        betas=(0.9, 0.95),
+        weight_decay = 0.01
+        )
+    else:
+        model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
 
     start_epoch = 0
     start_batch_idx = 0
@@ -375,14 +393,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lora_r",
         type=int,
-        default=32,
-        required=True
+        default=32
     )
     parser.add_argument(
         "--lora_alpha",
         type=int,
-        default=64,
-        required=True
+        default=64
     )
     parser.add_argument(
         "--gradient_accumulation",
@@ -406,6 +422,11 @@ if __name__ == "__main__":
         default=False
     )
     parser.add_argument(
+        "--lora",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
         "--tokens_json_path",
         type=str,
         default=""
@@ -422,6 +443,7 @@ if __name__ == "__main__":
         epochs = args.epochs,
         batch_size = args.batch_size,
         lr = args.lr,
+        lora = args.lora,
         lora_r = args.lora_r,
         lora_alpha = args.lora_alpha,
         gradient_accumulation = args.gradient_accumulation,
@@ -438,6 +460,7 @@ python -m TexGeneration.src.model.train \
 --epochs 5 \
 --batch_size 2 \
 --lr 1e-5 \
+--lora \
 --lora_r 32 \
 --lora_alpha 64 \
 --gradient_accumulation 8 \
