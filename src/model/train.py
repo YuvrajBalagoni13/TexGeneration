@@ -117,6 +117,13 @@ class NewTokenOutput(nn.Module):
                     token_id = tokenizer.convert_tokens_to_ids(token)
                     self.new_lm_head.weight[token_id - self.old_vocab_size] = avg
             
+    @property
+    def weight(self):
+        """
+        Exposes a weight attribute to internal wrapper hooks.
+        Returns the new_lm_head weight since that's what's training.
+        """
+        return self.new_lm_head.weight
     
     def forward(self, hidden_states):
         # hidden_states - [batch_size, seq_len, 1024]
@@ -403,6 +410,25 @@ def main(
     #########################
     #     lora Loading      #
     #########################
+
+    if lora:
+        print("Applying LoRA Config...")
+        lora_config = LoraConfig(
+            r=lora_r,
+            lora_alpha=lora_alpha,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        model = get_peft_model(model, lora_config)
+        
+        # If we added tokens, we must ensure their parameters remain trainable after LoRA wraps the model
+        if add_new_tokens:
+            model.base_model.model.get_input_embeddings().new_embeddings.weight.requires_grad_(True)
+            model.base_model.model.get_output_embeddings().new_lm_head.weight.requires_grad_(True)
+
+    model.print_trainable_parameters()
 
     # if lora:
     #     model = FastVisionModel.get_peft_model(

@@ -1,229 +1,687 @@
+import unsloth
+import os
 from transformers import AutoProcessor
-import json
+from transformers import Qwen3_5ForConditionalGeneration, Qwen3_5Config
+from peft import LoraConfig, get_peft_model, PeftModel
+import torch.nn as nn
+import torch
 from pathlib import Path
+from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pad_sequence
 from tqdm.auto import tqdm
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+from functools import partial
+import wandb
+import argparse
+import random
 import numpy as np
+import json
+from torch.amp import autocast, GradScaler
+from unsloth import FastVisionModel
+from torch.nn.functional as F
 
-dataset_dir = Path("ShaderDataset")
-img_files = list(dataset_dir.rglob("*.jpg"))
+# from .dataset import ShaderDataset
+from .shader_dataset import ShaderDataset
 
-processor = AutoProcessor.from_pretrained("Qwen/Qwen3.5-0.8B")
+# -- Custom Embedding classes ---------------------- #
 
-# -- Getting old sequence lengths ----------------------------------- #
-old_seq_lengths = []
-for img in tqdm(img_files, desc="Old tokenizer"):
-    txt_path = img.with_suffix(".txt")
-    with open(txt_path, "r") as f:
-        shader_text = f.read()
-    tokens = processor.tokenizer.tokenize(shader_text)
-    old_seq_lengths.append(len(tokens))
+class NewTokenEmbeddings(nn.Module):
+    def __init__(
+            self, 
+            old_embeddings : nn.Embedding = None,
+            embed_dim : int = 1024,
+            old_vocab_size : int = 248077,
+            tokenizer : any = None,
+            mean_subwords: bool = False,
+            subwords_id_list : list = None,
+            new_tokens : list = None
+        ) -> None:
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.old_embeddings = old_embeddings # [248077, 1024]
+        self.old_vocab_size = old_vocab_size
+        self.old_embeddings.requires_grad_(False)
 
-# -- Adding new tokens to tokenizer ------------------------------------ #
-new_tokens_json = "JSON_files/addition_tokens.json"
-with open(new_tokens_json, "r") as f:
-    token_dict = json.load(f)
+        self.num_new_tokens = len(new_tokens)
+        self.new_embeddings = nn.Embedding(self.num_new_tokens, embed_dim) # [237, 1024]
+        print(f"old vocab size - {self.old_vocab_size}")
+        print(f"new token size - {self.num_new_tokens}")
 
-print(f"old token vocab size - {len(processor.tokenizer)}")
-processor.tokenizer.add_tokens(token_dict["new_tokens"])
-processor.tokenizer.add_special_tokens({
-    "additional_special_tokens": token_dict["special_tokens"]
-})
-print(f"new token vocab size - {len(processor.tokenizer)}")
+        with torch.no_grad():
+            if mean_subwords:
+                if not subwords_id_list:
+                    raise ValueError(f"not subwords id list given ...")
+                for i, token in enumerate(new_tokens):
+                    token_id = tokenizer.convert_tokens_to_ids(token)
+                    avg = self.old_embeddings.weight[subwords_id_list[i]].mean(dim=0)
+                    self.new_embeddings.weight[token_id - self.old_vocab_size] = avg
+            else:
+                avg = self.old_embeddings.weight.mean(dim=0)
+                for i, token in enumerate(new_tokens):
+                    token_id = tokenizer.convert_tokens_to_ids(token)
+                    self.new_embeddings.weight[token_id - self.old_vocab_size] = avg
 
-# -- Getting new sequence lengths ----------------------------------- #
-seq_lengths = []
-for img in tqdm(img_files, desc="New tokenizer"):
-    txt_path = img.with_suffix(".txt")
-    with open(txt_path, "r") as f:
-        shader_text = f.read()
-    tokens = processor.tokenizer.tokenize(shader_text)
-    seq_lengths.append(len(tokens))
+    # def forward(self, input_ids):
+    #     old_mask = (input_ids < self.old_vocab_size)
+    #     new_mask = ~old_mask
 
-# -- Stats computation ---------------------------------------------- #
-def get_stats(lengths):
-    arr = np.array(lengths)
-    return {
-        "min":    int(arr.min()),
-        "max":    int(arr.max()),
-        "mean":   float(arr.mean()),
-        "median": float(np.median(arr)),
-        "std":    float(arr.std()),
-        "p25":    float(np.percentile(arr, 25)),
-        "p75":    float(np.percentile(arr, 75)),
-        "p90":    float(np.percentile(arr, 90)),
-        "p95":    float(np.percentile(arr, 95)),
-        "p99":    float(np.percentile(arr, 99)),
-        "under_512":  int((arr <= 512).sum()),
-        "under_1024": int((arr <= 1024).sum()),
-        "over_1024":  int((arr > 1024).sum()),
-        "total":  len(arr),
+    #     output = torch.zeros(
+    #         (*input_ids.shape, self.embed_dim),
+    #         device = input_ids.device,
+    #         dtype = self.old_embeddings.weight.dtype
+    #     )
+    #     if old_mask.any():
+    #         output[old_mask] = self.old_embeddings(input_ids[old_mask])
+    #     if new_mask.any():
+    #         new_ids = input_ids[new_mask] - self.old_vocab_size
+    #         output[new_mask] = self.new_embeddings(new_ids)
+    #     return output
+
+    def forward(self, input_ids):
+        is_old = (input_ids < self.old_vocab_size).unsqueeze(-1).to(input_ids.dtype)
+        old_ids = torch.clamp(input_ids, min=0, max=self.old_vocab_size - 1)
+        new_ids = torch.clamp(input_ids - self.old_vocab_size, min=0, max=self.num_new_tokens - 1)
+
+        old_vectors = self.old_embeddings(old_ids)
+        new_vectors = self.new_embeddings(new_ids)
+
+        return old_vectors * is_old + new_vectors * (1.0 - is_old)
+    
+class NewTokenOutput(nn.Module):
+    def __init__(
+            self, 
+            old_lm_head : nn.Linear = None,
+            embed_dim : int = 1024,
+            old_vocab_size : int = 248077,
+            tokenizer : any = None,
+            mean_subwords: bool = False,
+            subwords_id_list : list = None,
+            new_tokens : list = None
+    ) -> None:
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.old_lm_head = old_lm_head
+        self.old_vocab_size = old_vocab_size
+        self.old_lm_head.requires_grad_(False)
+
+        self.num_new_tokens = len(new_tokens)
+        self.new_lm_head = nn.Linear(embed_dim, self.num_new_tokens, bias = False)
+
+        with torch.no_grad():
+            if mean_subwords:
+                if not subwords_id_list:
+                    raise ValueError(f"not subwords id list given ...")
+                for i, token in enumerate(new_tokens):
+                    token_id = tokenizer.convert_tokens_to_ids(token)
+                    avg = self.old_lm_head.weight[subwords_id_list[i]].mean(dim=0)
+                    self.new_lm_head.weight[token_id - self.old_vocab_size] = avg
+            else:
+                avg = self.old_lm_head.weight.mean(dim=0)
+                for i, token in enumerate(new_tokens):
+                    token_id = tokenizer.convert_tokens_to_ids(token)
+                    self.new_lm_head.weight[token_id - self.old_vocab_size] = avg
+            
+    @property
+    def weight(self):
+        return self.new_lm_head.weight
+
+    def forward(self, hidden_states):
+        # hidden_states - [batch_size, seq_len, 1024]
+        old_token_logits = self.old_lm_head(hidden_states)  # [batch_size, seq_len, 248077]
+        old_token_logits = old_token_logits[..., :self.old_vocab_size]
+        new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 237]
+        logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248314]
+        return logits
+
+# -- seed & collate functions ---------------------- #
+
+def seed_everything(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+def shader_collate_fn(batch, pad_token_id = 0):
+    """
+    Adds padding to all the values to stack the batches together.
+    """
+    input_ids = pad_sequence([b["input_ids"] for b in batch], batch_first=True, padding_value=pad_token_id)
+    attention_mask = pad_sequence([b["attention_mask"] for b in batch], batch_first=True, padding_value=0)
+    mm_token_type_ids = pad_sequence([b["mm_token_type_ids"] for b in batch], batch_first=True, padding_value=0)
+    labels = pad_sequence([b["labels"] for b in batch], batch_first=True, padding_value=-100)
+
+    pixel_values = torch.stack([b["pixel_values"] for b in batch])
+
+    result = {
+        "input_ids" : input_ids,
+        "attention_mask" : attention_mask,
+        "mm_token_type_ids" : mm_token_type_ids,
+        "pixel_values" : pixel_values,
+        "labels" : labels,
     }
 
-old_stats = get_stats(old_seq_lengths)
-new_stats = get_stats(seq_lengths)
+    if "image_grid_thw" in batch[0]:
+        result["image_grid_thw"] = torch.stack([b["image_grid_thw"] for b in batch])
+    
+    return result
 
-reduction = np.array(old_seq_lengths) - np.array(seq_lengths)
+# -- log & save functions ---------------------- #
 
-# -- Visualization ---------------------------------------------- #
-plt.style.use("dark_background")
+def log_metrics(epoch, iteration, loss):
+    print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
+    wandb.log({
+        "epoch" : epoch,
+        "iteration" : iteration,
+        "train loss" : loss
+    })
 
-fig = plt.figure(figsize=(20, 24), facecolor="#0d0d0d")
-fig.suptitle("Token Sequence Length Analysis\nOld vs New Tokenizer", 
-             fontsize=22, fontweight="bold", color="#e0e0e0", y=0.98)
+def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, log_wandb):
+    print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
+    checkpoint_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}"
+    resume_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}_state"
+    os.makedirs(checkpoint_directory, exist_ok=True)
+    model.save_pretrained(checkpoint_directory)
+    processor.save_pretrained(checkpoint_directory)
+    os.makedirs(resume_directory, exist_ok=True)
 
-gs = gridspec.GridSpec(4, 2, figure=fig, hspace=0.45, wspace=0.35)
+    torch.save(optimizer.state_dict(), os.path.join(resume_directory, "optimizer.pth"))
 
-OLD_COLOR  = "#4fc3f7"
-NEW_COLOR  = "#f06292"
-DIFF_COLOR = "#81c784"
-GRID_COLOR = "#2a2a2a"
+    torch.save({
+        'epoch': epoch,
+        'iteration': iteration,
+        'run_name': run_name,
+    }, os.path.join(resume_directory, "training_state.pth"))
 
-# ── 1. Distribution histograms side by side ───────────────────────
-ax1 = fig.add_subplot(gs[0, 0])
-ax2 = fig.add_subplot(gs[0, 1])
+    print(f"------ Checkpoint saved to {checkpoint_directory} ------")
+    print(f"------ Resume Checkpoint saved to {resume_directory} ------")
 
-bins = np.linspace(
-    min(min(old_seq_lengths), min(seq_lengths)),
-    max(max(old_seq_lengths), max(seq_lengths)),
-    60
-)
+    if log_wandb:
+        artifact = wandb.Artifact(
+            name=f"texgen_lora_{run_name}",
+            type="model",
+            description=f"LoRA adapter weights - epoch {epoch+1} iteration {iteration}",
+            metadata={
+                "epoch": epoch + 1,
+                "iteration": iteration,
+                "run_name": run_name,
+            }
+        )
+        artifact.add_dir(f"ckpts_{run_name}_{epoch + 1}_{iteration}")  
+        wandb.log_artifact(artifact)
+    print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
-ax1.hist(old_seq_lengths, bins=bins, color=OLD_COLOR, alpha=0.85, edgecolor="#0d0d0d", linewidth=0.4)
-ax1.axvline(old_stats["mean"],   color="#ffeb3b", linestyle="--", linewidth=1.5, label=f'Mean {old_stats["mean"]:.0f}')
-ax1.axvline(old_stats["median"], color="#ff9800", linestyle=":",  linewidth=1.5, label=f'Median {old_stats["median"]:.0f}')
-ax1.axvline(512,  color="#ef5350", linestyle="-", linewidth=1.2, alpha=0.7, label="512 cutoff")
-ax1.axvline(1024, color="#ab47bc", linestyle="-", linewidth=1.2, alpha=0.7, label="1024 cutoff")
-ax1.set_title("Old Tokenizer Distribution", color=OLD_COLOR, fontsize=13, pad=8)
-ax1.set_xlabel("Sequence Length", color="#aaa")
-ax1.set_ylabel("Count", color="#aaa")
-ax1.legend(fontsize=8, facecolor="#1a1a1a", edgecolor="#333", labelcolor="#ddd")
-ax1.grid(True, color=GRID_COLOR, linewidth=0.5)
-ax1.tick_params(colors="#888")
-for spine in ax1.spines.values(): spine.set_edgecolor("#333")
+def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, optimizer_directory):
+    print(f"------ Loading checkpoint from {checkpoint_directory} ------")
+    
+    model = PeftModel.from_pretrained(base_model, checkpoint_directory)
+    processor = AutoProcessor.from_pretrained(checkpoint_directory)
+    
+    optimizer.load_state_dict(
+        torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
+        map_location='cuda')  
+    )
+    
+    state = torch.load(os.path.join(optimizer_directory, "training_state.pth"))
+    epoch = state['epoch']
+    iteration = state['iteration']
+    
+    print(f"------ Resumed from epoch {epoch + 1}, iteration {iteration} ------")
+    return model, processor, optimizer, epoch, iteration
 
-ax2.hist(seq_lengths, bins=bins, color=NEW_COLOR, alpha=0.85, edgecolor="#0d0d0d", linewidth=0.4)
-ax2.axvline(new_stats["mean"],   color="#ffeb3b", linestyle="--", linewidth=1.5, label=f'Mean {new_stats["mean"]:.0f}')
-ax2.axvline(new_stats["median"], color="#ff9800", linestyle=":",  linewidth=1.5, label=f'Median {new_stats["median"]:.0f}')
-ax2.axvline(512,  color="#ef5350", linestyle="-", linewidth=1.2, alpha=0.7, label="512 cutoff")
-ax2.axvline(1024, color="#ab47bc", linestyle="-", linewidth=1.2, alpha=0.7, label="1024 cutoff")
-ax2.set_title("New Tokenizer Distribution", color=NEW_COLOR, fontsize=13, pad=8)
-ax2.set_xlabel("Sequence Length", color="#aaa")
-ax2.set_ylabel("Count", color="#aaa")
-ax2.legend(fontsize=8, facecolor="#1a1a1a", edgecolor="#333", labelcolor="#ddd")
-ax2.grid(True, color=GRID_COLOR, linewidth=0.5)
-ax2.tick_params(colors="#888")
-for spine in ax2.spines.values(): spine.set_edgecolor("#333")
+def main(
+        run_name = "Qwen3.5_0.8B_run_2.0",
+        quantize = False,
+        epochs = 5,
+        batch_size = 2,
+        lr = 1e-5,
+        lora = True,
+        lora_r = 32,
+        lora_alpha = 64,
+        gradient_accumulation = 8,
+        load_ckpt_dir = "",
+        load_state_dir = "",
+        add_new_tokens = False,
+        tokens_json_path = "",
+        seed = 42
 
-# ── 2. Overlapping KDE-style comparison ──────────────────────────
-ax3 = fig.add_subplot(gs[1, :])
+) -> None:
+    seed_everything(seed)
+    
+   # -- Model Loading (Unsloth) ----------------------------- #
 
-ax3.hist(old_seq_lengths, bins=80, color=OLD_COLOR, alpha=0.5, label="Old tokenizer", edgecolor="none")
-ax3.hist(seq_lengths,     bins=80, color=NEW_COLOR, alpha=0.5, label="New tokenizer", edgecolor="none")
-ax3.axvline(512,  color="#ef5350", linestyle="--", linewidth=1.5, alpha=0.8, label="512")
-ax3.axvline(1024, color="#ab47bc", linestyle="--", linewidth=1.5, alpha=0.8, label="1024")
-ax3.set_title("Overlapping Distribution Comparison", color="#e0e0e0", fontsize=13, pad=8)
-ax3.set_xlabel("Sequence Length", color="#aaa")
-ax3.set_ylabel("Count", color="#aaa")
-ax3.legend(fontsize=10, facecolor="#1a1a1a", edgecolor="#333", labelcolor="#ddd")
-ax3.grid(True, color=GRID_COLOR, linewidth=0.5)
-ax3.tick_params(colors="#888")
-for spine in ax3.spines.values(): spine.set_edgecolor("#333")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ── 3. Token reduction per sample ────────────────────────────────
-ax4 = fig.add_subplot(gs[2, :])
+    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    # precision_type = torch.float16
 
-sorted_idx = np.argsort(reduction)[::-1]
-colors_bar = [DIFF_COLOR if r >= 0 else "#ef5350" for r in np.array(reduction)[sorted_idx]]
-ax4.bar(range(len(reduction)), np.array(reduction)[sorted_idx], color=colors_bar, alpha=0.8, width=1.0)
-ax4.axhline(0, color="#888", linewidth=0.8)
-ax4.axhline(reduction.mean(), color="#ffeb3b", linestyle="--", linewidth=1.5, label=f"Avg reduction: {reduction.mean():.1f}")
-ax4.set_title("Token Reduction per Sample (Old − New)", color="#e0e0e0", fontsize=13, pad=8)
-ax4.set_xlabel("Sample index (sorted by reduction)", color="#aaa")
-ax4.set_ylabel("Tokens saved", color="#aaa")
-ax4.legend(fontsize=10, facecolor="#1a1a1a", edgecolor="#333", labelcolor="#ddd")
-ax4.grid(True, color=GRID_COLOR, linewidth=0.5, axis="y")
-ax4.tick_params(colors="#888")
-for spine in ax4.spines.values(): spine.set_edgecolor("#333")
+    model, processor = FastVisionModel.from_pretrained(
+       model_name = "unsloth/Qwen3.5-0.8B",
+       load_in_4bit = True,
+       use_gradient_checkpointing = False,
+       max_seq_length = 768,
+       dtype = precision_type
+    )
 
-# ── 4. Stats table ────────────────────────────────────────────────
-ax5 = fig.add_subplot(gs[3, 0])
-ax5.axis("off")
+   # -- Model Loading (transformers) ------------------------ #
 
-labels = ["Min", "Max", "Mean", "Median", "Std Dev",
-          "P25", "P75", "P90", "P95", "P99",
-          "≤512", "≤1024", ">1024", "Total"]
-old_vals = [
-    old_stats["min"], old_stats["max"], f'{old_stats["mean"]:.1f}',
-    f'{old_stats["median"]:.1f}', f'{old_stats["std"]:.1f}',
-    f'{old_stats["p25"]:.0f}', f'{old_stats["p75"]:.0f}',
-    f'{old_stats["p90"]:.0f}', f'{old_stats["p95"]:.0f}', f'{old_stats["p99"]:.0f}',
-    f'{old_stats["under_512"]} ({100*old_stats["under_512"]/old_stats["total"]:.1f}%)',
-    f'{old_stats["under_1024"]} ({100*old_stats["under_1024"]/old_stats["total"]:.1f}%)',
-    f'{old_stats["over_1024"]} ({100*old_stats["over_1024"]/old_stats["total"]:.1f}%)',
-    old_stats["total"]
-]
-new_vals = [
-    new_stats["min"], new_stats["max"], f'{new_stats["mean"]:.1f}',
-    f'{new_stats["median"]:.1f}', f'{new_stats["std"]:.1f}',
-    f'{new_stats["p25"]:.0f}', f'{new_stats["p75"]:.0f}',
-    f'{new_stats["p90"]:.0f}', f'{new_stats["p95"]:.0f}', f'{new_stats["p99"]:.0f}',
-    f'{new_stats["under_512"]} ({100*new_stats["under_512"]/new_stats["total"]:.1f}%)',
-    f'{new_stats["under_1024"]} ({100*new_stats["under_1024"]/new_stats["total"]:.1f}%)',
-    f'{new_stats["over_1024"]} ({100*new_stats["over_1024"]/new_stats["total"]:.1f}%)',
-    new_stats["total"]
-]
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
 
-table = ax5.table(
-    cellText=[[l, str(o), str(n)] for l, o, n in zip(labels, old_vals, new_vals)],
-    colLabels=["Metric", "Old Tokenizer", "New Tokenizer"],
-    loc="center",
-    cellLoc="center"
-)
-table.auto_set_font_size(False)
-table.set_fontsize(9)
-table.scale(1, 1.6)
+    # precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    # # precision_type = torch.float16
 
-for (row, col), cell in table.get_celld().items():
-    cell.set_facecolor("#1a1a1a" if row == 0 else ("#0d0d0d" if row % 2 == 0 else "#141414"))
-    cell.set_text_props(color=OLD_COLOR if col == 1 and row > 0 else
-                              NEW_COLOR if col == 2 and row > 0 else "#e0e0e0")
-    cell.set_edgecolor("#2a2a2a")
+    # model = Qwen3_5ForConditionalGeneration.from_pretrained(
+    #     "Qwen/Qwen3.5-0.8B",
+    #     torch_dtype = precision_type,
+    #     device_map = device,
+    #     attn_implementation="sdpa"
+    # )
+    # processor = AutoProcessor.from_pretrained("Qwen/Qwen3.5-0.8B")
 
-ax5.set_title("Statistics Summary", color="#e0e0e0", fontsize=13, pad=12)
+    # model.gradient_checkpointing_enable(
+    #     gradient_checkpointing_kwargs={"use_reentrant": False}
+    # )
 
-# ── 5. Cumulative distribution ────────────────────────────────────
-ax6 = fig.add_subplot(gs[3, 1])
+    # precision_type = next(model.parameters()).dtype
+    # print(f"Model dtype: {precision_type}") 
 
-old_sorted = np.sort(old_seq_lengths)
-new_sorted = np.sort(seq_lengths)
-old_cdf = np.arange(1, len(old_sorted) + 1) / len(old_sorted)
-new_cdf = np.arange(1, len(new_sorted) + 1) / len(new_sorted)
+    # for params in model.parameters():
+    #     params.requires_grad_(False)
 
-ax6.plot(old_sorted, old_cdf * 100, color=OLD_COLOR, linewidth=2, label="Old tokenizer")
-ax6.plot(new_sorted, new_cdf * 100, color=NEW_COLOR, linewidth=2, label="New tokenizer")
-ax6.axvline(512,  color="#ef5350", linestyle="--", linewidth=1.2, alpha=0.8, label="512")
-ax6.axvline(1024, color="#ab47bc", linestyle="--", linewidth=1.2, alpha=0.8, label="1024")
-ax6.axhline(90, color="#888", linestyle=":", linewidth=1, alpha=0.6)
-ax6.axhline(95, color="#888", linestyle=":", linewidth=1, alpha=0.6)
-ax6.set_title("Cumulative Distribution (%)", color="#e0e0e0", fontsize=13, pad=8)
-ax6.set_xlabel("Sequence Length", color="#aaa")
-ax6.set_ylabel("% of samples", color="#aaa")
-ax6.legend(fontsize=9, facecolor="#1a1a1a", edgecolor="#333", labelcolor="#ddd")
-ax6.grid(True, color=GRID_COLOR, linewidth=0.5)
-ax6.tick_params(colors="#888")
-for spine in ax6.spines.values(): spine.set_edgecolor("#333")
+    # -- Get Input Embeddings & LM Head --------------------- #
 
-plt.savefig("token_analysis.png", dpi=150, bbox_inches="tight", facecolor="#0d0d0d")
-print("Saved to token_analysis.png")
+    if add_new_tokens:
+        with open(tokens_json_path, "r") as f:
+            tokens_dict = json.load(f)
 
-# -- Print summary to console --------------------------------------- #
-print("\n" + "="*50)
-print(f"{'Metric':<20} {'Old':>12} {'New':>12}")
-print("="*50)
-for label, o, n in zip(labels, old_vals, new_vals):
-    print(f"{label:<20} {str(o):>12} {str(n):>12}")
-print("="*50)
-print(f"{'Avg token reduction':<20} {reduction.mean():>12.1f}")
-print(f"{'Total tokens saved':<20} {int(reduction.sum()):>12,}")
+        old_vocab_size = len(processor.tokenizer)
+
+        new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+        subwords_id_list = []
+        for token in new_tokens:
+            subwords = processor.tokenizer.tokenize(token)
+            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+            subwords_id_list.append(subwords_id)
+        
+        processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
+        processor.tokenizer.add_special_tokens({
+            "additional_special_tokens" : tokens_dict["special_tokens"]
+        })
+
+        # untying the weights
+        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+          print("Weights are tied ...")
+          model.lm_head.weight = nn.Parameter(
+              model.get_output_embeddings().weight.clone()
+          )
+
+        input_embeddings = model.get_input_embeddings()
+        output_lm_head = model.get_output_embeddings()
+
+        new_embedding_layer = NewTokenEmbeddings(
+            old_embeddings = input_embeddings,
+            old_vocab_size = old_vocab_size,
+            embed_dim = 1024,
+            tokenizer = processor.tokenizer,
+            mean_subwords = True,
+            subwords_id_list = subwords_id_list,
+            new_tokens = new_tokens
+        )
+        new_lm_head = NewTokenOutput(
+            old_lm_head = output_lm_head,
+            embed_dim = 1024,
+            old_vocab_size = old_vocab_size,
+            tokenizer = processor.tokenizer,
+            mean_subwords = True,
+            subwords_id_list = subwords_id_list,
+            new_tokens = new_tokens
+        )
+
+        new_vocab_size = len(processor.tokenizer)
+        model.config.vocab_size = new_vocab_size
+        model.config.text_config.vocab_size = new_vocab_size
+
+        model.set_input_embeddings(new_embedding_layer)
+        model.set_output_embeddings(new_lm_head)
+
+        new_embedding_layer.to(precision_type).to(device)
+        new_lm_head.to(precision_type).to(device)
+
+    # -- Not Important ---------------------- #
+    ##########################
+    #     Adding tokens      #
+    ##########################
+    # if add_new_tokens:
+    #     with open(tokens_json_path, "r") as f:
+    #         tokens_dict = json.load(f)
+
+    #     old_vocab_size = len(processor.tokenizer)
+
+    #     tokens_list = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+    #     subwords_id_list = []
+    #     for token in tokens_list:
+    #         subwords = processor.tokenizer.tokenize(token)
+    #         subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+    #         subwords_id_list.append(subwords_id)
+
+    #     processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
+    #     processor.tokenizer.add_special_tokens({
+    #         "additional_special_tokens" : tokens_dict["special_tokens"]
+    #     })
+    #     model.resize_token_embeddings(len(processor.tokenizer))
+
+    #     input_embeddings = model.get_input_embeddings()
+    #     output_embeddings = model.get_output_embeddings()
+
+    #     with torch.no_grad():
+    #         for i, token in enumerate(tokens_list):
+    #             token_id = processor.tokenizer.convert_tokens_to_ids(token)
+    #             mean_in = input_embeddings.weight[subwords_id_list[i]].mean(dim=0)
+    #             mean_out = output_embeddings.weight[subwords_id_list[i]].mean(dim=0)
+
+    #             input_embeddings.weight[token_id] = mean_in
+    #             output_embeddings.weight[token_id] = mean_out
+
+    #     def freeze_old_input_grads(grad):
+    #         grad[:old_vocab_size] = 0
+    #         return grad
+        
+    #     def freeze_old_output_grads(grad):
+    #         grad[:old_vocab_size] = 0
+    #         return grad
+        
+    #     input_embeddings.requires_grad_(True)
+    #     output_embeddings.requires_grad_(True)
+
+    #     input_embeddings.weight.register_hook(freeze_old_input_grads)
+    #     output_embeddings.weight.register_hook(freeze_old_input_grads)
+
+    #     input_embeddings.to(precision_type)
+    #     output_embeddings.to(precision_type)
+        # embeddings = model.get_input_embeddings().weight.data
+        # new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+        
+        # for token in new_tokens_all:
+        #     token_id = processor.tokenizer.convert_tokens_to_ids(token)
+        #     subwords = processor.tokenizer.tokenize(token)
+        #     subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+        #     if subwords_id:
+        #         avg = embeddings[subwords_id].mean(dim=0)
+        #         embeddings[token_id] = avg
+            
+        # def freeze_old_embeddings_hook(grad):
+        #     grad[:old_vocab_length] = 0
+        #     return grad
+        
+        # model.get_input_embeddings().weight.requires_grad_(True)
+        # model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
+
+        # print(f"Old vocab size: {old_vocab_size}")
+        # print(f"New vocab size: {len(processor.tokenizer)}")
+        # print(f"Added {len(processor.tokenizer) - old_vocab_size} new tokens")
+
+    #########################
+    #     lora Loading      #
+    #########################
+
+    # if lora:
+    #     print("Applying LoRA Config...")
+    #     lora_config = LoraConfig(
+    #         r=lora_r,
+    #         lora_alpha=lora_alpha,
+    #         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    #         lora_dropout=0.05,
+    #         bias="none",
+    #         task_type="CAUSAL_LM"
+    #     )
+    #     model = get_peft_model(model, lora_config)
+        
+    #     # If we added tokens, we must ensure their parameters remain trainable after LoRA wraps the model
+    #     if add_new_tokens:
+    #         model.base_model.model.get_input_embeddings().new_embeddings.weight.requires_grad_(True)
+    #         model.base_model.model.get_output_embeddings().new_lm_head.weight.requires_grad_(True)
+
+    # model.print_trainable_parameters()
+
+    if lora:
+        model = FastVisionModel.get_peft_model(
+           model, 
+           finetune_vision_layers = True,
+           finetune_language_layers = True,
+           finetune_attention_modules = True,
+           finetune_mlp_modules = True,
+           r = lora_r,
+           lora_alpha = lora_alpha,
+           lora_dropout = 0,
+           bias = "none",
+           random_state = 3697,
+           use_rslora = True,
+        ).to(device)
+
+    model.print_trainable_parameters()
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
+
+    # -- Dataset Loading ------------------------- #
+
+    # using 768 as max seq length because p95 of data distribution is 751
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
+
+    # this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
+    collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
+
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
+    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
+    
+    # -- Training ------------------------------- #
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    model_optimizer = torch.optim.AdamW(trainable_params, lr=lr)
+
+    # scaler = GradScaler(enabled = (precision_type == torch.float16))
+
+    start_epoch = 0
+    start_batch_idx = 0
+    if load_ckpt_dir and load_state_dir:
+        model, processor, model_optimizer, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, load_ckpt_dir, load_state_dir)
+
+    total_epochs = epochs
+    ACCUMULATION_INTERVAL = gradient_accumulation
+
+    wandb.init(project="TexGeneration", name=run_name, config = {
+        "epochs" : epochs,
+        "batch_size" : batch_size,
+        "lr" : lr,
+        "lora-r" : lora_r,
+        "lora-alpha" : lora_alpha,
+        "gradient accumulation" : gradient_accumulation
+    })
+
+    int_keys = {"input_ids", "attention_mask", "labels", "image_grid_thw", "mm_token_type_ids"}
+    for epoch in range(start_epoch, total_epochs):
+        model.train()
+        loss = 0
+        model_optimizer.zero_grad()
+        for batch_idx, current_batch in tqdm(enumerate(training_dataloader)):
+
+            if batch_idx < start_batch_idx:
+                continue
+
+            batch = {k : v.to(device)
+                    for k, v in current_batch.items()}
+            
+            labels = batch.pop("labels")
+
+            with autocast('cuda', dtype=precision_type):
+                outputs = model(**batch)
+                logits = outputs.logits
+
+                shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+                shift_labels = labels[..., 1:].contiguous().view(-1)
+                batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
+
+                batch_loss = batch_loss / ACCUMULATION_INTERVAL
+
+            # scaler.scale(batch_loss).backward()
+            batch_loss.backward()
+
+            if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
+                # scaler.unscale_(model_optimizer)
+                total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
+                if torch.isnan(total_norm):
+                    print(f"Got NAN Gradients, Skipping step ...")
+                # scaler.step(model_optimizer)
+                # scaler.update()
+                model_optimizer.step()
+                model_optimizer.zero_grad()
+
+            loss += batch_loss.item() * ACCUMULATION_INTERVAL
+
+            if batch_idx % 5 == 0:
+                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
+
+            if batch_idx % 250 == 0 and batch_idx != 0:
+                save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, True)
+
+        loss = loss / len(training_dataloader)
+        print(f"total loss - {loss} after epochs - {total_epochs}")
+
+        # -- Evaluation ------------------------ #
+
+        model.eval()
+        eval_loss = 0
+        with torch.no_grad():
+            for eval_batch in tqdm(testing_dataloader):
+                batch = {k : v.to(precision_type).to(device) if k not in int_keys else v.to(device)
+                         for k, v in eval_batch.items()}
+
+                eval_outputs = model(**batch)
+                eval_batch_loss = eval_outputs.loss
+
+                eval_loss += eval_batch_loss.item()
+
+            wandb.log({
+                "epoch" : epoch,
+                "eval loss" : eval_loss / len(testing_dataloader)
+            })
+
+            print(f"Epoch {epoch} | evaluation loss - {eval_loss}")
+
+        save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    gradient_accumulation = 8,
+    load_ckpt_dir = "",
+    load_state_dir = ""
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default="Qwen3.5_0.8B_run_2.0"
+    )
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        required=True
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=2,
+        required=True
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-5,
+        required=True
+    )
+    parser.add_argument(
+        "--lora_r",
+        type=int,
+        default=32
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=int,
+        default=64
+    )
+    parser.add_argument(
+        "--gradient_accumulation",
+        type=int,
+        default=8,
+        required=True
+    )
+    parser.add_argument(
+        "--load_ckpt_dir",
+        type=str,
+        default=""
+    )
+    parser.add_argument(
+        "--load_state_dir",
+        type=str,
+        default=""
+    )
+    parser.add_argument(
+        "--add_new_tokens",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--lora",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--tokens_json_path",
+        type=str,
+        default=""
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42
+    )
+    args = parser.parse_args()
+
+    main(
+        run_name = args.run_name,
+        quantize = args.quantize,
+        epochs = args.epochs,
+        batch_size = args.batch_size,
+        lr = args.lr,
+        lora = args.lora,
+        lora_r = args.lora_r,
+        lora_alpha = args.lora_alpha,
+        gradient_accumulation = args.gradient_accumulation,
+        load_ckpt_dir = args.load_ckpt_dir,
+        load_state_dir = args.load_state_dir,
+        add_new_tokens = args.add_new_tokens,
+        tokens_json_path = args.tokens_json_path,
+        seed = args.seed
+    )
+
+"""
+python -m TexGeneration.src.model.train \
+--run_name Qwen3.5_0.8B_run_2.2 \
+--quantize \
+--epochs 5 \
+--batch_size 2 \
+--lr 1e-5 \
+--lora \
+--lora_r 32 \
+--lora_alpha 64 \
+--gradient_accumulation 8 \
+--add_new_tokens \
+--tokens_json_path addition_tokens.json
+"""
