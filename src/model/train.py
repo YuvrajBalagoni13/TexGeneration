@@ -16,7 +16,8 @@ import numpy as np
 import json
 from torch.amp import autocast, GradScaler
 
-from .dataset import ShaderDataset
+# from .dataset import ShaderDataset
+from .shader_dataset import ShaderDataset
 
 # -- Custom Embedding classes ---------------------- #
 
@@ -239,7 +240,7 @@ def main(
 
     # precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
     precision_type = torch.float16
-    
+
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
         "Qwen/Qwen3.5-0.8B",
         torch_dtype = precision_type,
@@ -428,8 +429,8 @@ def main(
     testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator)
     
     # -- Training ------------------------------- #
-
-    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    model_optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
     scaler = GradScaler()
 
@@ -479,7 +480,6 @@ def main(
                     model_optimizer.zero_grad()
                     continue
                 scaler.step(model_optimizer)
-                model_optimizer.step()
                 model_optimizer.zero_grad()
 
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
