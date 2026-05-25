@@ -57,21 +57,31 @@ class NewTokenEmbeddings(nn.Module):
                     token_id = tokenizer.convert_tokens_to_ids(token)
                     self.new_embeddings.weight[token_id - self.old_vocab_size] = avg
 
-    def forward(self, input_ids):
-        old_mask = (input_ids < self.old_vocab_size)
-        new_mask = ~old_mask
+    # def forward(self, input_ids):
+    #     old_mask = (input_ids < self.old_vocab_size)
+    #     new_mask = ~old_mask
 
-        output = torch.zeros(
-            (*input_ids.shape, self.embed_dim),
-            device = input_ids.device,
-            dtype = self.old_embeddings.weight.dtype
-        )
-        if old_mask.any():
-            output[old_mask] = self.old_embeddings(input_ids[old_mask])
-        if new_mask.any():
-            new_ids = input_ids[new_mask] - self.old_vocab_size
-            output[new_mask] = self.new_embeddings(new_ids)
-        return output
+    #     output = torch.zeros(
+    #         (*input_ids.shape, self.embed_dim),
+    #         device = input_ids.device,
+    #         dtype = self.old_embeddings.weight.dtype
+    #     )
+    #     if old_mask.any():
+    #         output[old_mask] = self.old_embeddings(input_ids[old_mask])
+    #     if new_mask.any():
+    #         new_ids = input_ids[new_mask] - self.old_vocab_size
+    #         output[new_mask] = self.new_embeddings(new_ids)
+    #     return output
+
+    def forward(self, input_ids):
+        is_old = (input_ids < self.old_vocab_size).unsqueeze(-1).to(input_ids.dtype)
+        old_ids = torch.clamp(input_ids, max=self.old_vocab_size - 1)
+        new_ids = torch.clamp(input_ids - self.old_vocab_size, min=0)
+
+        old_vectors = self.old_embeddings(old_ids)
+        new_vectors = self.new_embeddings(new_ids)
+
+        return old_vectors * is_old + new_vectors * (1.0 - is_old)
     
 class NewTokenOutput(nn.Module):
     def __init__(
@@ -238,8 +248,8 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
-    precision_type = torch.float16
+    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    # precision_type = torch.float16
 
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
         "Qwen/Qwen3.5-0.8B",
@@ -432,7 +442,7 @@ def main(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     model_optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
-    scaler = GradScaler()
+    scaler = GradScaler(enabled = (precision_type == torch.float16))
 
     start_epoch = 0
     start_batch_idx = 0
@@ -476,10 +486,8 @@ def main(
                 total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
                 if torch.isnan(total_norm):
                     print(f"Got NAN Gradients, Skipping step ...")
-                    scaler.update()
-                    model_optimizer.zero_grad()
-                    continue
                 scaler.step(model_optimizer)
+                scaler.update()
                 model_optimizer.zero_grad()
 
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
