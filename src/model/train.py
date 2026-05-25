@@ -110,6 +110,7 @@ class NewTokenOutput(nn.Module):
     def forward(self, hidden_states):
         # hidden_states - [batch_size, seq_len, 1024]
         old_token_logits = self.old_lm_head(hidden_states)  # [batch_size, seq_len, 248077]
+        old_token_logits = old_token_logits[..., :self.old_vocab_size]
         new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 237]
         logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248314]
         return logits
@@ -236,14 +237,19 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
-
+    # precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    precision_type = torch.float16
+    
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
         "Qwen/Qwen3.5-0.8B",
         torch_dtype = precision_type,
         device_map = device
     )
     processor = AutoProcessor.from_pretrained("Qwen/Qwen3.5-0.8B")
+
+    model.gradient_checkpointing_enable(
+        gradient_checkpointing_kwargs={"use_reentrant": False}
+    )
 
     precision_type = next(model.parameters()).dtype
     print(f"Model dtype: {precision_type}") 
@@ -272,9 +278,11 @@ def main(
         })
 
         # untying the weights
-        model.lm_head.weight = nn.Parameter(
-            model.get_output_embeddings().weight.clone()
-        )
+        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+          print("Weights are tied ...")
+          model.lm_head.weight = nn.Parameter(
+              model.get_output_embeddings().weight.clone()
+          )
 
         input_embeddings = model.get_input_embeddings()
         output_lm_head = model.get_output_embeddings()
@@ -298,8 +306,15 @@ def main(
             new_tokens = new_tokens
         )
 
+        new_vocab_size = len(processor.tokenizer)
+        model.config.vocab_size = new_vocab_size
+        model.config.text_config.vocab_size = new_vocab_size
+
         model.set_input_embeddings(new_embedding_layer)
         model.set_output_embeddings(new_lm_head)
+
+        new_embedding_layer.to(precision_type).to(device)
+        new_lm_head.to(precision_type).to(device)
 
     # -- Not Important ---------------------- #
     ##########################
@@ -400,8 +415,9 @@ def main(
 
     # -- Dataset Loading ------------------------- #
 
-    training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=1024)
-    testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=1024)
+    # using 768 as max seq length because p95 of data distribution is 751
+    training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
+    testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
 
     # this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
