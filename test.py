@@ -17,7 +17,7 @@ import numpy as np
 import json
 from torch.amp import autocast, GradScaler
 from unsloth import FastVisionModel
-from torch.nn.functional as F
+import torch.nn.functional as F
 
 # from .dataset import ShaderDataset
 from .shader_dataset import ShaderDataset
@@ -128,8 +128,8 @@ class NewTokenOutput(nn.Module):
         # hidden_states - [batch_size, seq_len, 1024]
         old_token_logits = self.old_lm_head(hidden_states)  # [batch_size, seq_len, 248077]
         old_token_logits = old_token_logits[..., :self.old_vocab_size]
-        new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 237]
-        logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248314]
+        new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 233]
+        logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248310]
         return logits
 
 # -- seed & collate functions ---------------------- #
@@ -341,6 +341,7 @@ def main(
         new_vocab_size = len(processor.tokenizer)
         model.config.vocab_size = new_vocab_size
         model.config.text_config.vocab_size = new_vocab_size
+        setattr(model.config, "vocab_size", new_vocab_size)
 
         model.set_input_embeddings(new_embedding_layer)
         model.set_output_embeddings(new_lm_head)
@@ -458,8 +459,17 @@ def main(
            random_state = 3697,
            use_rslora = True,
         ).to(device)
+        print("------- LoRA Trainable parameters -------")
+        model.print_trainable_parameters()
+    
+    if add_new_tokens:
+      model.get_input_embeddings().new_embeddings.requires_grad_(True)
+      model.get_output_embeddings().new_lm_head.requires_grad_(True)
 
-    model.print_trainable_parameters()
+      model.enable_input_require_grads()
+      model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+      print("------- Tokens Trainable parameters enabled & checkpointed -------")
+
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
