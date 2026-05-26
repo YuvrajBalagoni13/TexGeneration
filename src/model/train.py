@@ -1,3 +1,4 @@
+import unsloth
 import os
 from transformers import AutoProcessor
 from transformers import Qwen3_5ForConditionalGeneration, Qwen3_5Config
@@ -15,6 +16,8 @@ import random
 import numpy as np
 import json
 from torch.amp import autocast, GradScaler
+from unsloth import FastVisionModel
+import torch.nn.functional as F
 
 # from .dataset import ShaderDataset
 from .shader_dataset import ShaderDataset
@@ -57,26 +60,10 @@ class NewTokenEmbeddings(nn.Module):
                     token_id = tokenizer.convert_tokens_to_ids(token)
                     self.new_embeddings.weight[token_id - self.old_vocab_size] = avg
 
-    # def forward(self, input_ids):
-    #     old_mask = (input_ids < self.old_vocab_size)
-    #     new_mask = ~old_mask
-
-    #     output = torch.zeros(
-    #         (*input_ids.shape, self.embed_dim),
-    #         device = input_ids.device,
-    #         dtype = self.old_embeddings.weight.dtype
-    #     )
-    #     if old_mask.any():
-    #         output[old_mask] = self.old_embeddings(input_ids[old_mask])
-    #     if new_mask.any():
-    #         new_ids = input_ids[new_mask] - self.old_vocab_size
-    #         output[new_mask] = self.new_embeddings(new_ids)
-    #     return output
-
     def forward(self, input_ids):
         is_old = (input_ids < self.old_vocab_size).unsqueeze(-1).to(input_ids.dtype)
-        old_ids = torch.clamp(input_ids, max=self.old_vocab_size - 1)
-        new_ids = torch.clamp(input_ids - self.old_vocab_size, min=0)
+        old_ids = torch.clamp(input_ids, min=0, max=self.old_vocab_size - 1)
+        new_ids = torch.clamp(input_ids - self.old_vocab_size, min=0, max=self.num_new_tokens - 1)
 
         old_vectors = self.old_embeddings(old_ids)
         new_vectors = self.new_embeddings(new_ids)
@@ -119,18 +106,14 @@ class NewTokenOutput(nn.Module):
             
     @property
     def weight(self):
-        """
-        Exposes a weight attribute to internal wrapper hooks.
-        Returns the new_lm_head weight since that's what's training.
-        """
         return self.new_lm_head.weight
-    
+
     def forward(self, hidden_states):
         # hidden_states - [batch_size, seq_len, 1024]
         old_token_logits = self.old_lm_head(hidden_states)  # [batch_size, seq_len, 248077]
         old_token_logits = old_token_logits[..., :self.old_vocab_size]
-        new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 237]
-        logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248314]
+        new_token_logits = self.new_lm_head(hidden_states)  # [batch_size, seq_len, 233]
+        logits = torch.cat([old_token_logits, new_token_logits], dim=-1) # [batch_size, seq_len, 248310]
         return logits
 
 # -- seed & collate functions ---------------------- #
@@ -250,30 +233,19 @@ def main(
 ) -> None:
     seed_everything(seed)
     
-
-   # -- Model Loading ------------------------ #
+   # -- Model Loading (Unsloth) ----------------------------- #
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
-    # precision_type = torch.float16
 
-    model = Qwen3_5ForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen3.5-0.8B",
-        torch_dtype = precision_type,
-        device_map = device
+    model, processor = FastVisionModel.from_pretrained(
+       model_name = "unsloth/Qwen3.5-0.8B",
+       load_in_4bit = quantize,
+       use_gradient_checkpointing = True,
+       max_seq_length = 768,
+       dtype = precision_type
     )
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen3.5-0.8B")
-
-    model.gradient_checkpointing_enable(
-        gradient_checkpointing_kwargs={"use_reentrant": False}
-    )
-
-    precision_type = next(model.parameters()).dtype
-    print(f"Model dtype: {precision_type}") 
-
-    for params in model.parameters():
-        params.requires_grad_(False)
 
     # -- Get Input Embeddings & LM Head --------------------- #
 
@@ -327,6 +299,7 @@ def main(
         new_vocab_size = len(processor.tokenizer)
         model.config.vocab_size = new_vocab_size
         model.config.text_config.vocab_size = new_vocab_size
+        setattr(model.config, "vocab_size", new_vocab_size)
 
         model.set_input_embeddings(new_embedding_layer)
         model.set_output_embeddings(new_lm_head)
@@ -334,141 +307,53 @@ def main(
         new_embedding_layer.to(precision_type).to(device)
         new_lm_head.to(precision_type).to(device)
 
-    # -- Not Important ---------------------- #
-    ##########################
-    #     Adding tokens      #
-    ##########################
-    # if add_new_tokens:
-    #     with open(tokens_json_path, "r") as f:
-    #         tokens_dict = json.load(f)
-
-    #     old_vocab_size = len(processor.tokenizer)
-
-    #     tokens_list = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-    #     subwords_id_list = []
-    #     for token in tokens_list:
-    #         subwords = processor.tokenizer.tokenize(token)
-    #         subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
-    #         subwords_id_list.append(subwords_id)
-
-    #     processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
-    #     processor.tokenizer.add_special_tokens({
-    #         "additional_special_tokens" : tokens_dict["special_tokens"]
-    #     })
-    #     model.resize_token_embeddings(len(processor.tokenizer))
-
-    #     input_embeddings = model.get_input_embeddings()
-    #     output_embeddings = model.get_output_embeddings()
-
-    #     with torch.no_grad():
-    #         for i, token in enumerate(tokens_list):
-    #             token_id = processor.tokenizer.convert_tokens_to_ids(token)
-    #             mean_in = input_embeddings.weight[subwords_id_list[i]].mean(dim=0)
-    #             mean_out = output_embeddings.weight[subwords_id_list[i]].mean(dim=0)
-
-    #             input_embeddings.weight[token_id] = mean_in
-    #             output_embeddings.weight[token_id] = mean_out
-
-    #     def freeze_old_input_grads(grad):
-    #         grad[:old_vocab_size] = 0
-    #         return grad
-        
-    #     def freeze_old_output_grads(grad):
-    #         grad[:old_vocab_size] = 0
-    #         return grad
-        
-    #     input_embeddings.requires_grad_(True)
-    #     output_embeddings.requires_grad_(True)
-
-    #     input_embeddings.weight.register_hook(freeze_old_input_grads)
-    #     output_embeddings.weight.register_hook(freeze_old_input_grads)
-
-    #     input_embeddings.to(precision_type)
-    #     output_embeddings.to(precision_type)
-        # embeddings = model.get_input_embeddings().weight.data
-        # new_tokens_all = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-        
-        # for token in new_tokens_all:
-        #     token_id = processor.tokenizer.convert_tokens_to_ids(token)
-        #     subwords = processor.tokenizer.tokenize(token)
-        #     subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
-        #     if subwords_id:
-        #         avg = embeddings[subwords_id].mean(dim=0)
-        #         embeddings[token_id] = avg
-            
-        # def freeze_old_embeddings_hook(grad):
-        #     grad[:old_vocab_length] = 0
-        #     return grad
-        
-        # model.get_input_embeddings().weight.requires_grad_(True)
-        # model.get_input_embeddings().weight.register_hook(freeze_old_embeddings_hook)
-
-        # print(f"Old vocab size: {old_vocab_size}")
-        # print(f"New vocab size: {len(processor.tokenizer)}")
-        # print(f"Added {len(processor.tokenizer) - old_vocab_size} new tokens")
-
-    #########################
-    #     lora Loading      #
-    #########################
+    # -- LoRA Initialization ------------------------------ #
 
     if lora:
-        print("Applying LoRA Config...")
-        lora_config = LoraConfig(
-            r=lora_r,
-            lora_alpha=lora_alpha,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM"
-        )
-        model = get_peft_model(model, lora_config)
-        
-        # If we added tokens, we must ensure their parameters remain trainable after LoRA wraps the model
-        if add_new_tokens:
-            model.base_model.model.get_input_embeddings().new_embeddings.weight.requires_grad_(True)
-            model.base_model.model.get_output_embeddings().new_lm_head.weight.requires_grad_(True)
+        model = FastVisionModel.get_peft_model(
+           model, 
+           finetune_vision_layers = True,
+           finetune_language_layers = True,
+           finetune_attention_modules = True,
+           finetune_mlp_modules = True,
+           r = lora_r,
+           lora_alpha = lora_alpha,
+           lora_dropout = 0,
+           bias = "none",
+           random_state = 3697,
+           use_rslora = True,
+        ).to(device)
+        print("------- LoRA Trainable parameters -------")
+        model.print_trainable_parameters()
+    
+    if add_new_tokens:
+      model.get_input_embeddings().new_embeddings.requires_grad_(True)
+      model.get_output_embeddings().new_lm_head.requires_grad_(True)
 
-    model.print_trainable_parameters()
+      model.enable_input_require_grads()
+      model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+      print("------- Tokens Trainable parameters enabled & checkpointed -------")
 
-    # if lora:
-    #     model = FastVisionModel.get_peft_model(
-    #        model, 
-    #        finetune_vision_layers = True,
-    #        finetune_language_layers = True,
-    #        finetune_attention_modules = True,
-    #        finetune_mlp_modules = True,
-    #        r = lora_r,
-    #        lora_alpha = lora_alpha,
-    #        lora_dropout = 0,
-    #        bias = "none",
-    #        random_state = 3697,
-    #        use_rslora = True,
-    #     ).to(device)
-
-    # model.print_trainable_parameters()
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
 
     # -- Dataset Loading ------------------------- #
 
-    # using 768 as max seq length because p95 of data distribution is 751
-    training_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
-    testing_dataset = ShaderDataset("/content/drive/MyDrive/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
+    # using 768 as max seq length because p95 of data distribution is 751 - can refer to token_analysis.png
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
 
-    # this fills the pad_token_id because DataLoader only give batch as input to this so we fill this with ourselve before
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
     generator = torch.Generator()
     generator.manual_seed(seed)
-    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator)
-    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator)
+    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
+    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
     
     # -- Training ------------------------------- #
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     model_optimizer = torch.optim.AdamW(trainable_params, lr=lr)
-
-    scaler = GradScaler(enabled = (precision_type == torch.float16))
 
     start_epoch = 0
     start_batch_idx = 0
@@ -499,21 +384,26 @@ def main(
 
             batch = {k : v.to(device)
                     for k, v in current_batch.items()}
+            
+            labels = batch.pop("labels")
 
             with autocast('cuda', dtype=precision_type):
                 outputs = model(**batch)
-                batch_loss = outputs.loss
+                logits = outputs.logits
+
+                shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+                shift_labels = labels[..., 1:].contiguous().view(-1)
+                batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
+
                 batch_loss = batch_loss / ACCUMULATION_INTERVAL
 
-            scaler.scale(batch_loss).backward()
+            batch_loss.backward()
 
             if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
-                scaler.unscale_(model_optimizer)
                 total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
-                if torch.isnan(total_norm):
-                    print(f"Got NAN Gradients, Skipping step ...")
-                scaler.step(model_optimizer)
-                scaler.update()
+                if torch.isnan(total_norm) or torch.isinf(total_norm):
+                    print(f"Gradients having issue, Skipping step ...")
+                model_optimizer.step()
                 model_optimizer.zero_grad()
 
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
@@ -533,11 +423,18 @@ def main(
         eval_loss = 0
         with torch.no_grad():
             for eval_batch in tqdm(testing_dataloader):
-                batch = {k : v.to(precision_type).to(device) if k not in int_keys else v.to(device)
+                batch = {k : v.to(device)
                          for k, v in eval_batch.items()}
+                
+                labels = batch.pop("labels")
 
-                eval_outputs = model(**batch)
-                eval_batch_loss = eval_outputs.loss
+                with autocast('cuda', dtype = precision_type):
+                    eval_outputs = model(**batch)
+                    logits = eval_outputs.logits
+
+                    shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+                    shift_labels = labels[..., 1:].contiguous().view(-1)
+                    eval_batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
 
                 eval_loss += eval_batch_loss.item()
 

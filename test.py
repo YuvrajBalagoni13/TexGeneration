@@ -258,7 +258,7 @@ def main(
 
     model, processor = FastVisionModel.from_pretrained(
        model_name = "unsloth/Qwen3.5-0.8B",
-       load_in_4bit = True,
+       load_in_4bit = quantize,
        use_gradient_checkpointing = False,
        max_seq_length = 768,
        dtype = precision_type
