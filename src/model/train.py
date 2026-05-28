@@ -237,7 +237,7 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
 
     model, processor = FastVisionModel.from_pretrained(
        model_name = "unsloth/Qwen3.5-0.8B",
@@ -249,63 +249,63 @@ def main(
 
     # -- Get Input Embeddings & LM Head --------------------- #
 
-    if add_new_tokens:
-        with open(tokens_json_path, "r") as f:
-            tokens_dict = json.load(f)
+    # if add_new_tokens:
+    #     with open(tokens_json_path, "r") as f:
+    #         tokens_dict = json.load(f)
 
-        old_vocab_size = len(processor.tokenizer)
+    #     old_vocab_size = len(processor.tokenizer)
 
-        new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-        subwords_id_list = []
-        for token in new_tokens:
-            subwords = processor.tokenizer.tokenize(token)
-            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
-            subwords_id_list.append(subwords_id)
+    #     new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+    #     subwords_id_list = []
+    #     for token in new_tokens:
+    #         subwords = processor.tokenizer.tokenize(token)
+    #         subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+    #         subwords_id_list.append(subwords_id)
         
-        processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
-        processor.tokenizer.add_special_tokens({
-            "additional_special_tokens" : tokens_dict["special_tokens"]
-        })
+    #     processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
+    #     processor.tokenizer.add_special_tokens({
+    #         "additional_special_tokens" : tokens_dict["special_tokens"]
+    #     })
 
-        # untying the weights
-        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
-          print("Weights are tied ...")
-          model.lm_head.weight = nn.Parameter(
-              model.get_output_embeddings().weight.clone()
-          )
+    #     # untying the weights
+    #     if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+    #       print("Weights are tied ...")
+    #       model.lm_head.weight = nn.Parameter(
+    #           model.get_output_embeddings().weight.clone()
+    #       )
 
-        input_embeddings = model.get_input_embeddings()
-        output_lm_head = model.get_output_embeddings()
+    #     input_embeddings = model.get_input_embeddings()
+    #     output_lm_head = model.get_output_embeddings()
 
-        new_embedding_layer = NewTokenEmbeddings(
-            old_embeddings = input_embeddings,
-            old_vocab_size = old_vocab_size,
-            embed_dim = 1024,
-            tokenizer = processor.tokenizer,
-            mean_subwords = True,
-            subwords_id_list = subwords_id_list,
-            new_tokens = new_tokens
-        )
-        new_lm_head = NewTokenOutput(
-            old_lm_head = output_lm_head,
-            embed_dim = 1024,
-            old_vocab_size = old_vocab_size,
-            tokenizer = processor.tokenizer,
-            mean_subwords = True,
-            subwords_id_list = subwords_id_list,
-            new_tokens = new_tokens
-        )
+    #     new_embedding_layer = NewTokenEmbeddings(
+    #         old_embeddings = input_embeddings,
+    #         old_vocab_size = old_vocab_size,
+    #         embed_dim = 1024,
+    #         tokenizer = processor.tokenizer,
+    #         mean_subwords = True,
+    #         subwords_id_list = subwords_id_list,
+    #         new_tokens = new_tokens
+    #     )
+    #     new_lm_head = NewTokenOutput(
+    #         old_lm_head = output_lm_head,
+    #         embed_dim = 1024,
+    #         old_vocab_size = old_vocab_size,
+    #         tokenizer = processor.tokenizer,
+    #         mean_subwords = True,
+    #         subwords_id_list = subwords_id_list,
+    #         new_tokens = new_tokens
+    #     )
 
-        new_vocab_size = len(processor.tokenizer)
-        model.config.vocab_size = new_vocab_size
-        model.config.text_config.vocab_size = new_vocab_size
-        setattr(model.config, "vocab_size", new_vocab_size)
+    #     new_vocab_size = len(processor.tokenizer)
+    #     model.config.vocab_size = new_vocab_size
+    #     model.config.text_config.vocab_size = new_vocab_size
+    #     setattr(model.config, "vocab_size", new_vocab_size)
 
-        model.set_input_embeddings(new_embedding_layer)
-        model.set_output_embeddings(new_lm_head)
+    #     model.set_input_embeddings(new_embedding_layer)
+    #     model.set_output_embeddings(new_lm_head)
 
-        new_embedding_layer.to(precision_type).to(device)
-        new_lm_head.to(precision_type).to(device)
+    #     new_embedding_layer.to(precision_type).to(device)
+    #     new_lm_head.to(precision_type).to(device)
 
     # -- LoRA Initialization ------------------------------ #
 
@@ -326,23 +326,23 @@ def main(
         print("------- LoRA Trainable parameters -------")
         model.print_trainable_parameters()
     
-    if add_new_tokens:
-      model.get_input_embeddings().new_embeddings.requires_grad_(True)
-      model.get_output_embeddings().new_lm_head.requires_grad_(True)
+    # if add_new_tokens:
+    #   model.get_input_embeddings().new_embeddings.requires_grad_(True)
+    #   model.get_output_embeddings().new_lm_head.requires_grad_(True)
 
-      model.enable_input_require_grads()
-      model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-      print("------- Tokens Trainable parameters enabled & checkpointed -------")
+    #   model.enable_input_require_grads()
+    #   model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    #   print("------- Tokens Trainable parameters enabled & checkpointed -------")
 
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total = sum(p.numel() for p in model.parameters())
-    print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
+    # trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    # total = sum(p.numel() for p in model.parameters())
+    # print(f"Trainable: {trainable:,} || Total: {total:,} || {100 * trainable / total:.2f}%")
 
     # -- Dataset Loading ------------------------- #
 
     # using 768 as max seq length because p95 of data distribution is 751 - can refer to token_analysis.png
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=False)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=False)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
@@ -352,8 +352,22 @@ def main(
     testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
     
     # -- Training ------------------------------- #
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    model_optimizer = torch.optim.AdamW(trainable_params, lr=lr)
+
+    # embedding_params = []
+    # model_params = []
+    # for name, params in model.named_parameters():
+    #     if params.requires_grad:
+    #         if ("new_embeddings" in name or "new_lm_head" in name):
+    #             embedding_params.append(params)
+    #         else:
+    #             model_params.append(params)
+        
+    # # trainable_params = [p for p in model.parameters() if p.requires_grad]
+    # model_optimizer = torch.optim.AdamW([
+    #     {"params": embedding_params, "lr": lr * 0.01},
+    #     {"params": model_params, "lr": lr}
+    # ])
+    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     start_epoch = 0
     start_batch_idx = 0
@@ -385,16 +399,17 @@ def main(
             batch = {k : v.to(device)
                     for k, v in current_batch.items()}
             
-            labels = batch.pop("labels")
+            # labels = batch.pop("labels")
 
             with autocast('cuda', dtype=precision_type):
                 outputs = model(**batch)
-                logits = outputs.logits
+                # logits = outputs.logits
 
-                shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
-                shift_labels = labels[..., 1:].contiguous().view(-1)
-                batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
-
+                # shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+                # shift_labels = labels[..., 1:].contiguous().view(-1)
+                # batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
+                
+                batch_loss = outputs.loss
                 batch_loss = batch_loss / ACCUMULATION_INTERVAL
 
             batch_loss.backward()
