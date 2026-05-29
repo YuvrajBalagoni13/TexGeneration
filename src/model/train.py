@@ -19,8 +19,8 @@ from torch.amp import autocast, GradScaler
 from unsloth import FastVisionModel
 import torch.nn.functional as F
 
-# from .dataset import ShaderDataset
-from .shader_dataset import ShaderDataset
+from .dataset import ShaderDataset
+# from .shader_dataset import ShaderDataset
 
 # -- Custom Embedding classes ---------------------- #
 
@@ -345,8 +345,8 @@ def main(
     # -- Dataset Loading ------------------------- #
 
     # using 768 as max seq length because p95 of data distribution is 751 - can refer to token_analysis.png
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=False)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=False)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
@@ -367,12 +367,14 @@ def main(
                     model_params.append(params)
 
         model_optimizer = torch.optim.AdamW([
-            {"params": embedding_params, "lr": lr * 10},
+            {"params": embedding_params, "lr": lr * 0.01},
             {"params": model_params, "lr": lr}
-        ])
+        ],
+        fused = True
+        )
     else:
         trainable_params = [p for p in model.parameters() if p.requires_grad]
-        model_optimizer = torch.optim.AdamW(trainable_params, lr=lr)
+        model_optimizer = torch.optim.Adam(trainable_params, lr=lr, fused=True)
 
     start_epoch = 0
     start_batch_idx = 0
