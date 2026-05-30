@@ -171,6 +171,15 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, log
     os.makedirs(checkpoint_directory, exist_ok=True)
     model.save_pretrained(checkpoint_directory)
     processor.save_pretrained(checkpoint_directory)
+    
+    torch.save(
+        model.get_input_embeddings().new_embeddings.state_dict(),
+        os.path.join(checkpoint_directory, "new_embeddings.pth")
+    )
+    torch.save(
+        model.get_output_embeddings().new_lm_head.state_dict(),
+        os.path.join(checkpoint_directory, "new_lm_head.pth")
+    )
     os.makedirs(resume_directory, exist_ok=True)
 
     torch.save(optimizer.state_dict(), os.path.join(resume_directory, "optimizer.pth"))
@@ -205,6 +214,12 @@ def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, opti
     model = PeftModel.from_pretrained(base_model, checkpoint_directory)
     processor = AutoProcessor.from_pretrained(checkpoint_directory)
     
+    model.get_input_embeddings().new_embeddings.load_state_dict(
+        torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
+    )
+    model.get_output_embeddings().new_lm_head.load_state_dict(
+        torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
+    )
     optimizer.load_state_dict(
         torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
         map_location='cuda')  
@@ -311,6 +326,13 @@ def main(
         new_embedding_layer.to(precision_type).to(device)
         new_lm_head.to(precision_type).to(device)
 
+        # for saving & loading checkpoints
+        config_class = model.config.__class__
+        if not isinstance(getattr(config_class, "vocab_size", None), property):
+            config_class.vocab_size = property(
+                lambda self: self.text_config.vocab_size
+            )
+
     # -- LoRA Initialization ------------------------------ #
 
     if lora:
@@ -345,8 +367,8 @@ def main(
     # -- Dataset Loading ------------------------- #
 
     # using 768 as max seq length because p95 of data distribution is 751 - can refer to token_analysis.png
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
