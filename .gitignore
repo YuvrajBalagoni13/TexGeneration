@@ -3,6 +3,7 @@ artifacts/
 CurrentDataset/
 ShaderDataset/
 past_dataset/
+unsloth_compiled_cache/
 grouptxt/
 material_dataset_filtered/
 model_ckpts/
