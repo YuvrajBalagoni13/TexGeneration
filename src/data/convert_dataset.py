@@ -1,14 +1,11 @@
 import sys
 import os
 
-# Get the directory where convert_dataset.py is located
 script_dir = os.path.dirname(os.path.realpath(__file__))
 
-# Add that directory to the search path
 if script_dir not in sys.path:
     sys.path.append(script_dir)
 
-# Now you can import dsl
 import dsl
 import bpy
 
@@ -67,7 +64,6 @@ for file_path in tqdm(py_files):
     except Exception as e:
         print(f"{file_path} : {e}")
         continue
-    # break
 
 print("completed conversions...")
 print(f"converted {count} .py files into .txt successfully")

@@ -8,17 +8,16 @@ def get_new_tokens(
         dataset_path: str,
         vocab: dict
 ) -> list[str]:
-    # get all the txt files
+    
     txt_files = Path(dataset_path).rglob("*.txt")
 
-    # initialize a set & new tokens list
     check_tokens = set()
 
     for txt_file in tqdm(txt_files):
         try:
             if txt_file.name == "blender_full.txt":
                 continue
-            # open each files
+
             with open(txt_file, "r") as f:
                 shader_text = f.read()
 
@@ -77,7 +76,7 @@ def main(
 
     # get the new_tokens
     new_tokens = get_new_tokens(dataset_path=dataset_path, vocab=vocab)
-    special_tokens = ["N|", "P|", "L|", ";", ":", ">", ".", "i-", ".dv"]
+    special_tokens = ["N|", "P|", "L|", "i-", ".dv"]
 
     # export the new tokens & special tokens in a json file
     with open(save_json_path, "w") as f:

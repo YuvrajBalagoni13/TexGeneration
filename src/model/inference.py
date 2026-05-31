@@ -1,10 +1,22 @@
 from unsloth import FastVisionModel
 import torch
-from transformers import TextStreamer
+from peft import PeftModel
+from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 from PIL import Image
+from pathlib import Path
 
-class Inference:
-    def __init__(self, model_name: str = "unsloth/Qwen3.5-2B", load_in_4bit: bool = True, device: str = None) -> None:
+class UnslothInference:
+    def __init__(
+            self, 
+            model_name: str = None, 
+            lora_path : str = None,
+            quantize: bool = True, 
+            device: str = None,
+            max_seq_length : int = 768
+            ) -> None:
+        
+        self.max_seq_length = max_seq_length
+
         if device:
             self.device = device
         else:
@@ -12,24 +24,55 @@ class Inference:
 
         self.precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
 
-        self.model, self.processor = FastVisionModel.from_pretrained(
-            model_name,
-            load_in_4bit = load_in_4bit,
-            use_gradient_checkpointing = False,
-            max_seq_length = 1024,
-            dtype = self.precision_type
-        )
-        FastVisionModel.for_inference(self.model)
-
-    def infer(self, image_path: str = "", input_prompt: str = "") -> str:
-        messages = [
+        self.message = [
             {"role" : "user",
              "content" : [
                  {"type": "image"},
-                 {"type": "text", "text" : input_prompt}
+                 {"type": "text", "text" : (
+                     "Generate a text based shader graph in the following format -\n"
+                     "N|node_name:node_type;...\n"
+                     "P|node_name.property_path:value;...\n"
+                     "L|node_name.output_socket>node_name.input_socket;...\n"
+                     "Here N| represents nodes, P| tells properties & L| tells links."
+                 )}
              ]}
         ]
-        input_text = self.processor.apply_chat_template(messages, add_generation_prompt = True)
+
+        self.model, self.processor = FastVisionModel.from_pretrained(
+            model_name,
+            load_in_4bit = quantize,
+            use_gradient_checkpointing = False,
+            max_seq_length = self.max_seq_length,
+            dtype = self.precision_type
+        )
+        self.model = PeftModel.from_pretrained(
+            self.model,
+            lora_path
+        )
+
+        old_embeddings = self.model.get_input_embeddings()
+        old_lm_head = self.model.get_output_embeddings()
+
+        new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth")
+        new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth")
+
+        input_embeddings = torch.concat([old_embeddings, new_embeddings], dim=0)
+        output_lm_head = torch.concat([old_lm_head, new_lm_head], dim=0)
+
+        self.model.resize_token_embeddings(input_embeddings.shape[0])
+
+        self.get_input_embeddings().weight.data = input_embeddings.to(self.precision_type)
+        self.get_output_embeddings().weight.data = output_lm_head.to(self.precision_type)
+
+        FastVisionModel.for_inference(self.model)
+
+    def infer(
+            self, 
+            image_path: str = "", 
+            input_prompt: str = ""
+            ) -> str:
+        
+        input_text = self.processor.apply_chat_template(self.message, add_generation_prompt = True)
         inputs = self.processor(
             Image.open(image_path),
             input_text,
@@ -40,14 +83,193 @@ class Inference:
         if "pixel_values" in inputs:
             inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
 
-        text_streamer = TextStreamer(self.processor, skip_prompt = True)
-        output = self.model.generate(**inputs, streamer = text_streamer, max_new_tokens = 1024,
+        output = self.model.generate(**inputs, max_new_tokens = self.max_seq_length,
                    use_cache = True, do_sample = True, temperature = 0.5, min_p = 0.1)
         input_length = inputs["input_ids"].shape[1]
         decoded = self.processor.decode(output[0][input_length:], skip_special_tokens=True)
         return decoded
     
+    def batch_infer(
+            self,
+            image_paths : list[str],
+            prompt : str
+    ) -> dict:
+        images = [
+            Image.open(image) for image in image_paths
+        ]
+        texts = [
+            self.processor.apply_chat_template(
+                self.message,
+                add_generation_prompt = True
+            ) for _ in image_paths
+        ]
+        inputs = self.processor(
+            text = texts,
+            images = images,
+            return_tensors = "pt",
+            max_length = self.max_seq_length
+        ).to(self.device)
 
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens = self.max_seq_length,
+                do_sample = True,
+                temperature = 0.5,
+                pad_token_id=self.processor.tokenizer.pad_token_id,
+            )
+        
+        results = {}
+        for i, output in enumerate(outputs):
+            input_length = inputs['input_ids'][i].shape[0]
+            decoded = self.processor.decode(output[input_length:])
+            results[str(image_paths[i])] = decoded
+        return results
+    
+class Inference:
+    def __init__(
+            self,
+            model_base: str = None,
+            lora_path: str = None,
+            quantize: bool = True,
+            max_seq_length : int = 768,
+            device: str = None,
+            precision_type: any = None,
+            new_tokens: bool = False
+    ) -> None:
+        if device:
+            self.device = device
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if precision_type:
+            self.precision_type = precision_type
+        else:
+            self.precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+
+        self.max_seq_length = max_seq_length
+
+        self.message = [
+            {
+                "role" : "user",
+                "content" : [
+                    {"type" : "image"},
+                    {"type" : "text", "text" : (
+                     "Generate a text based shader graph in the following format -\n"
+                     "N|node_name:node_type;...\n"
+                     "P|node_name.property_path:value;...\n"
+                     "L|node_name.output_socket>node_name.input_socket;...\n"
+                     "Here N| represents nodes, P| tells properties & L| tells links."
+                    )}
+                ]
+            }
+        ]
+
+        self.model = Qwen3_5ForConditionalGeneration.from_pretrained(
+            model_base,
+            torch_dtype = self.precision_type,
+            device_map = self.device
+        )
+        self.processor = AutoProcessor.from_pretrained(lora_path)
+
+        if lora_path:
+            self.model = PeftModel.from_pretrained(
+                self.model,
+                lora_path
+            )
+
+        if new_tokens:
+            old_embeddings = self.model.get_input_embeddings().weight.data
+            old_lm_head = self.model.get_output_embeddings().weight.data
+
+            new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth")
+            new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth")
+
+            input_embeddings = torch.cat([old_embeddings, new_embeddings], dim=0)
+            output_lm_head = torch.cat([old_lm_head, new_lm_head], dim=0)
+
+            self.model.resize_token_embeddings(input_embeddings.shape[0])
+
+            self.model.get_input_embeddings().weight.data = input_embeddings.to(self.precision_type)
+            self.model.get_output_embeddings().weight.data = output_lm_head.to(self.precision_type)
+
+        self.model.eval()
+    
+    def infer(
+            self,
+            image_path : str = None,
+            prompt : str = None
+    ) -> str:
+        image = Image.open(image_path)
+
+        text = self.processor.apply_chat_template(
+            self.message,
+            add_generation_prompt = True
+        )
+        inputs = self.processor(
+            text = [text],
+            images = [image],
+            return_tensors = "pt",
+            max_length = self.max_seq_length
+        ).to(self.device)
+
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
+
+        with torch.no_grad():
+            output = self.model.generate(
+                **inputs,
+                max_new_tokens = self.max_seq_length,
+                do_sample = True,
+                temperature = 0.5
+            )
+        
+        input_length = inputs['input_ids'].shape[1]
+        return self.processor.decode(output[0][input_length:])
+    
+    def batch_infer(
+            self,
+            image_paths : list[str],
+            prompt : str
+    ) -> dict:
+        images = [
+            Image.open(image) for image in image_paths
+        ]
+        texts = [
+            self.processor.apply_chat_template(
+                self.message,
+                add_generation_prompt = True
+            ) for _ in image_paths
+        ]
+        inputs = self.processor(
+            text = texts,
+            images = images,
+            return_tensors = "pt",
+            max_length = self.max_seq_length
+        ).to(self.device)
+
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens = self.max_seq_length,
+                do_sample = True,
+                temperature = 0.5,
+                pad_token_id=self.processor.tokenizer.pad_token_id,
+            )
+        
+        results = {}
+        for i, output in enumerate(outputs):
+            input_length = inputs['input_ids'][i].shape[0]
+            decoded = self.processor.decode(output[input_length:])
+            results[str(image_paths[i])] = decoded
+        return results
+    
 if __name__ == "__main__":
     print("working!")
     # inference = Inference()

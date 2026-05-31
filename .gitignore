@@ -1,4 +1,5 @@
 chromadb/
+artifacts/
 CurrentDataset/
 ShaderDataset/
 past_dataset/

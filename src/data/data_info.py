@@ -19,10 +19,10 @@ data_info = {}
 
 data_info["avg_no_of_nodes"] = 0
 data_info["avg_no_of_links"] = 0
-data_info["nodes_info"] = defaultdict(int)  # FIX: KeyError on +=
+data_info["nodes_info"] = defaultdict(int)  
 data_info["no_of_nodes_outliers"] = 0
 data_info["nodes_outliers"] = {}
-data_info["links_info"] = defaultdict(int)  # FIX: KeyError on +=
+data_info["links_info"] = defaultdict(int)  
 data_info["nodes_distribution"] = []
 data_info["links_distribution"] = []
 

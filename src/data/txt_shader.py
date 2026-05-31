@@ -10,6 +10,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 
 class TextShader:
+    """
+    Main class for coversion from text to shader & shader to text.
+    """
     def __init__(self, nodes:list[str] = None, properties: list[str] = None, links:list[str] = None,dsl_text:str = None) -> None:
         self.node_info = nodes or []
         self.properties_info = properties or []
