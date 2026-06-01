@@ -12,7 +12,6 @@ import random
 from .inference import UnslothInference, Inference
 
 def main(
-        self,
         model_base : str,
         lora_path : str,
         eval_data_path : str,
@@ -20,7 +19,8 @@ def main(
         data_length : int,
         batch_process : bool,
         batch_size : int,
-        new_tokens : bool
+        new_tokens : bool,
+        tokens_json_path : str
 ) -> dict:
     dataset_list = random.sample(list(Path(eval_data_path).rglob("*.jpg")), data_length)
     
@@ -57,7 +57,7 @@ if __name__ == "__main__":
         help="base model weights path if saved or download base model"
     )
     parser.add_argument(
-        "eval_data_path",
+        "--eval_data_path",
         type=str,
         required=True
     )
@@ -92,7 +92,7 @@ if __name__ == "__main__":
         default=4
     )
     parser.add_argument(
-        "new_tokens",
+        "--new_tokens",
         action="store_true",
         default=False
     )

@@ -4,15 +4,17 @@ from peft import PeftModel
 from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 from PIL import Image
 from pathlib import Path
+import json
 
 class UnslothInference:
     def __init__(
             self, 
-            model_name: str = None, 
+            model_base: str = None, 
             lora_path : str = None,
             quantize: bool = True, 
             device: str = None,
-            max_seq_length : int = 768
+            max_seq_length : int = 768,
+            new_tokens : bool = True
             ) -> None:
         
         self.max_seq_length = max_seq_length
@@ -39,7 +41,7 @@ class UnslothInference:
         ]
 
         self.model, self.processor = FastVisionModel.from_pretrained(
-            model_name,
+            model_base,
             load_in_4bit = quantize,
             use_gradient_checkpointing = False,
             max_seq_length = self.max_seq_length,
@@ -50,19 +52,23 @@ class UnslothInference:
             lora_path
         )
 
-        old_embeddings = self.model.get_input_embeddings()
-        old_lm_head = self.model.get_output_embeddings()
+        if new_tokens:
+            new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth", map_location=self.device)
+            new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth", map_location=self.device)
 
-        new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth")
-        new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth")
+            if isinstance(new_embeddings, dict):
+                new_embeddings = new_embeddings[list(new_embeddings.keys())[0]]
+            if isinstance(new_lm_head, dict):
+                new_lm_head = new_lm_head[list(new_lm_head.keys())[0]]
 
-        input_embeddings = torch.concat([old_embeddings, new_embeddings], dim=0)
-        output_lm_head = torch.concat([old_lm_head, new_lm_head], dim=0)
+            self.model.resize_token_embeddings(len(self.processor.tokenizer), pad_to_multiple_of=None)
 
-        self.model.resize_token_embeddings(input_embeddings.shape[0])
+            n = new_embeddings.shape[0]
+            self.model.get_input_embeddings().weight.data[-n:]  = new_embeddings.to(self.precision_type)
+            self.model.get_output_embeddings().weight.data[-n:] = new_lm_head.to(self.precision_type)
 
-        self.get_input_embeddings().weight.data = input_embeddings.to(self.precision_type)
-        self.get_output_embeddings().weight.data = output_lm_head.to(self.precision_type)
+        print("final embedding size:", self.model.get_input_embeddings().weight.shape[0])
+        print("tokenizer size:", len(self.processor.tokenizer))
 
         FastVisionModel.for_inference(self.model)
 
@@ -91,8 +97,8 @@ class UnslothInference:
     
     def batch_infer(
             self,
-            image_paths : list[str],
-            prompt : str
+            image_paths : list[str] = None,
+            prompt : str = None
     ) -> dict:
         images = [
             Image.open(image) for image in image_paths
@@ -182,20 +188,22 @@ class Inference:
             )
 
         if new_tokens:
-            old_embeddings = self.model.get_input_embeddings().weight.data
-            old_lm_head = self.model.get_output_embeddings().weight.data
+            new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth", map_location=self.device)
+            new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth", map_location=self.device)
 
-            new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth")
-            new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth")
+            if isinstance(new_embeddings, dict):
+                new_embeddings = new_embeddings[list(new_embeddings.keys())[0]]
+            if isinstance(new_lm_head, dict):
+                new_lm_head = new_lm_head[list(new_lm_head.keys())[0]]
 
-            input_embeddings = torch.cat([old_embeddings, new_embeddings], dim=0)
-            output_lm_head = torch.cat([old_lm_head, new_lm_head], dim=0)
+            self.model.resize_token_embeddings(len(self.processor.tokenizer), pad_to_multiple_of=None)
 
-            self.model.resize_token_embeddings(input_embeddings.shape[0])
+            n = new_embeddings.shape[0]
+            self.model.get_input_embeddings().weight.data[-n:]  = new_embeddings.to(self.precision_type)
+            self.model.get_output_embeddings().weight.data[-n:] = new_lm_head.to(self.precision_type)
 
-            self.model.get_input_embeddings().weight.data = input_embeddings.to(self.precision_type)
-            self.model.get_output_embeddings().weight.data = output_lm_head.to(self.precision_type)
-
+        print("final embedding size:", self.model.get_input_embeddings().weight.shape[0])
+        print("tokenizer size:", len(self.processor.tokenizer))
         self.model.eval()
     
     def infer(
@@ -232,8 +240,8 @@ class Inference:
     
     def batch_infer(
             self,
-            image_paths : list[str],
-            prompt : str
+            image_paths : list[str] = None,
+            prompt : str = None
     ) -> dict:
         images = [
             Image.open(image) for image in image_paths
@@ -261,6 +269,7 @@ class Inference:
                 do_sample = True,
                 temperature = 0.5,
                 pad_token_id=self.processor.tokenizer.pad_token_id,
+                eos_token_id=self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
             )
         
         results = {}
