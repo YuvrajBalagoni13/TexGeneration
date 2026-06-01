@@ -88,7 +88,7 @@ def main(
        model_name = "unsloth/Qwen3.5-0.8B",
        load_in_4bit = quantize,
        use_gradient_checkpointing = True,
-       max_seq_length = 768,
+       max_seq_length = 800,
        dtype = precision_type
     )
 
@@ -107,10 +107,10 @@ def main(
             subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
             subwords_id_list.append(subwords_id)
         
-        processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
-        processor.tokenizer.add_special_tokens({
-            "additional_special_tokens" : tokens_dict["special_tokens"]
-        })
+        processor.tokenizer.add_tokens(new_tokens)
+        # processor.tokenizer.add_special_tokens({
+        #     "additional_special_tokens" : tokens_dict["special_tokens"]
+        # })
 
         # untying the weights
         if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
@@ -118,6 +118,7 @@ def main(
           model.lm_head.weight = nn.Parameter(
               model.get_output_embeddings().weight.clone()
           )
+          model.lm_head.weight.requires_grad_(False)
 
         input_embeddings = model.get_input_embeddings()
         output_lm_head = model.get_output_embeddings()
@@ -193,8 +194,8 @@ def main(
     # -- Dataset Loading ------------------------- #
 
     # using 768 as max seq length because p95 of data distribution is 751 - can refer to token_analysis.png
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=768, skip_over_length=True)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=768, skip_over_length=True)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=450, skip_over_length=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=450, skip_over_length=True)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 

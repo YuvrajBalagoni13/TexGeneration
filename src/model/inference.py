@@ -141,7 +141,7 @@ class Inference:
             model_base: str = None,
             lora_path: str = None,
             quantize: bool = True,
-            max_seq_length : int = 768,
+            max_seq_length : int = 450,
             device: str = None,
             precision_type: any = None,
             new_tokens: bool = False
@@ -256,7 +256,7 @@ class Inference:
             text = texts,
             images = images,
             return_tensors = "pt",
-            max_length = self.max_seq_length
+            # max_length = self.max_seq_length
         ).to(self.device)
 
         if "pixel_values" in inputs:
@@ -275,7 +275,7 @@ class Inference:
         results = {}
         for i, output in enumerate(outputs):
             input_length = inputs['input_ids'][i].shape[0]
-            decoded = self.processor.decode(output[input_length:])
+            decoded = self.processor.decode(output[input_length:], skip_special_tokens=True)
             results[str(image_paths[i])] = decoded
         return results
     

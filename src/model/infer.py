@@ -9,6 +9,7 @@ import json
 from tqdm.auto import tqdm
 import random
 
+from .dataset import ShaderDataset
 from .inference import UnslothInference, Inference
 
 def main(
@@ -22,13 +23,16 @@ def main(
         new_tokens : bool,
         tokens_json_path : str
 ) -> dict:
-    dataset_list = random.sample(list(Path(eval_data_path).rglob("*.jpg")), data_length)
-    
+    # dataset_list = random.sample(list(Path(eval_data_path).rglob("*.jpg")), data_length)
+    processor = AutoProcessor.from_pretrained(lora_path)
+    dataset = ShaderDataset(eval_data_path, processor, max_seq_length=450, skip_over_length=True)
+    dataset_list = random.sample(dataset.samples, data_length)
+
     inference = Inference(
         model_base=model_base,
         lora_path=lora_path,
         quantize=quantize,
-        max_seq_length=768,
+        max_seq_length=450,
         new_tokens=new_tokens
     )
     results = []

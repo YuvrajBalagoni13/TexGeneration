@@ -106,8 +106,8 @@ class ShaderDataset(Dataset):
             text = full_text,
             images = image,
             return_tensors = "pt",
-            truncation = True,
-            max_length = self.max_seq_length,
+            # truncation = True,
+            # max_length = self.max_seq_length,
             padding = False
         )
 
@@ -115,8 +115,8 @@ class ShaderDataset(Dataset):
             text = prompt_only,
             images = image,
             return_tensors = "pt",
-            truncation = True,
-            max_length = self.max_seq_length,
+            # truncation = True,
+            # max_length = self.max_seq_length,
             padding = False
         )
 
