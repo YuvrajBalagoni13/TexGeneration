@@ -6,6 +6,7 @@ past_dataset/
 unsloth_compiled_cache/
 grouptxt/
 material_dataset_filtered/
+RenderedOutputs/
 model_ckpts/
 /Test.blend
 /Test.blend1

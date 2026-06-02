@@ -87,6 +87,8 @@ class TextShader:
         return ",".join(properties)
 
     def text_to_shader_graph(self, text_shader_path : str = None, text_shader : str = None, material_name: str = "TemporaryMaterial") -> bpy.types.Material:
+        self._reset_shader()
+
         if text_shader_path:
             with open(text_shader_path, "r") as f:
                 self.dsl_text = f.read()

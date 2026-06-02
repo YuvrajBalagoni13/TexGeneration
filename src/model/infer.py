@@ -20,13 +20,16 @@ def main(
         data_length : int,
         batch_process : bool,
         batch_size : int,
-        new_tokens : bool,
-        tokens_json_path : str
+        new_tokens : bool
 ) -> dict:
     # dataset_list = random.sample(list(Path(eval_data_path).rglob("*.jpg")), data_length)
     processor = AutoProcessor.from_pretrained(lora_path)
     dataset = ShaderDataset(eval_data_path, processor, max_seq_length=450, skip_over_length=True)
-    dataset_list = random.sample(dataset.samples, data_length)
+    sample_list = random.sample(dataset.samples, data_length)
+
+    dataset_list = []
+    for sample in sample_list:
+      dataset_list.append(sample['image'])
 
     inference = Inference(
         model_base=model_base,
@@ -35,10 +38,10 @@ def main(
         max_seq_length=450,
         new_tokens=new_tokens
     )
-    results = []
+
     if batch_process:
         batches = [dataset_list[i:i + batch_size] for i in range(0, len(dataset_list), batch_size)]
-        print(f"----- Processing {len(batches)} batches with {batch_size} batch sizes -----")
+        print(f"----- Processing {len(batches)} batches with {batch_size} batch sizes (total samples = {data_length}) -----")
         for batch in tqdm(batches):
             outputs = inference.batch_infer(batch)
 
@@ -48,7 +51,7 @@ def main(
         print(f"----- Processing {len(dataset_list)} images -----")
         for image in tqdm(dataset_list):
             output = inference.infer(image)
-            results[k] = output
+            results[str(image)] = output
     
     return results
 
