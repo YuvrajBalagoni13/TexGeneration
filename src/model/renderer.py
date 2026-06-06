@@ -109,6 +109,7 @@ class Renderer:
             self,
             render_path : Path | str,
             text_shader : str = None,
+            clean_material : bool = True
     ) -> tuple[bool, str | None]:
         """
         renders the scene
@@ -135,8 +136,10 @@ class Renderer:
 
         bpy.context.scene.render.filepath = str(render_path)
         bpy.ops.render.render(write_still=True)
-
-        self.current_mesh.data.materials.clear()
+        
+        self.text_shader_converter.cleanup_material()
+        if clean_material:
+            self.current_mesh.data.materials.clear()
         self.purge_orphan_data()
 
         return True, None 
@@ -193,11 +196,13 @@ def main(
 
         output_valid, output_error = renderer.render(
             render_path = render_output_image,
-            text_shader = output
+            text_shader = output,
+            clean_material=True
         )
         shader_valid, shader_error = renderer.render(
             render_path = render_shader_image,
-            text_shader = text_shader
+            text_shader = text_shader,
+            clean_material=True
         )
 
         # adding these paths to the results dict
@@ -207,12 +212,12 @@ def main(
         # calculating LPIPS score if valid else log error & score MIN_VAL
         current_info["output_error"] = output_error
         current_info["shader_error"] = shader_error
-        current_info["LPIPS_score"] = None 
+        current_info["score"] = None 
         
         result_info[str(input_image_path)] = current_info
         
         count += 1
-        if count == 15:
+        if count == 100:
             break
     
     # save output_results dict into json
@@ -253,7 +258,7 @@ if __name__ == "__main__":
   --background \
   --python src/model/renderer.py \
   -- \
-  --result_json_path saved_output_results.json \
-  --save_json_path results_info.json \
-  --render_path RenderedOutputs
+  --result_json_path result_inference_json/inference_outputs/temp_0_3_top_p_0_95.json \
+  --save_json_path result_inference_json/results/results_info_temp_0_3_top_p_0_95.json \
+  --render_path RenderedOutputs/temp_0_3_top_p_0_95
 """

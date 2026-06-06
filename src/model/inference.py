@@ -232,7 +232,8 @@ class Inference:
                 **inputs,
                 max_new_tokens = self.max_seq_length,
                 do_sample = True,
-                temperature = 0.5
+                temperature = 0.5,
+                top_p = 0.95
             )
         
         input_length = inputs['input_ids'].shape[1]
@@ -266,8 +267,9 @@ class Inference:
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens = self.max_seq_length,
-                do_sample = True,
-                temperature = 0.5,
+                do_sample = False,
+                temperature = 0.0,
+                repition_penalty = 1.1,
                 pad_token_id=self.processor.tokenizer.pad_token_id,
                 eos_token_id=self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
             )

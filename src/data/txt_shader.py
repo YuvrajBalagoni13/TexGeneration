@@ -52,6 +52,11 @@ class TextShader:
         self.temp_mat.use_nodes = True
         self.temp_mat.node_tree.nodes.clear()
 
+    def cleanup_material(self) -> None:
+        if self.temp_mat is not None:
+            bpy.data.materials.remove(self.temp_mat, do_unlink=True)
+            self.temp_mat = None
+
     def _parse_txt_shader(self) -> None:
         self._reset_info()
         lines = self.dsl_text.strip().split("\n")
@@ -111,12 +116,11 @@ class TextShader:
             self.current_node_dict[var] = self.temp_mat.node_tree.nodes.new(node_type)
             self.current_node_mapping[var] = node_type
 
-        for key, val in self.current_node_mapping.items():
-            if val == "ShaderNodeTexVoronoi":
-                self.current_node_dict[key].voronoi_dimensions = '4D'
-                self.current_node_dict[key].distance = 'MINKOWSKI'
-            elif val == "ShaderNodeTexNoise":
-                self.current_node_dict[key].noise_dimensions = '4D'
+            if node_type == "ShaderNodeTexVoronoi":
+                self.current_node_dict[var].voronoi_dimensions = '4D'
+                self.current_node_dict[var].distance = 'MINKOWSKI'
+            elif node_type == "ShaderNodeTexNoise":
+                self.current_node_dict[var].noise_dimensions = '4D'
 
         for properties in self.properties_info:
             property_path, val = properties.split(":")
@@ -130,13 +134,6 @@ class TextShader:
             current_node_type = self.current_node_mapping[path_list[0]]
 
             evaluated_val = ast.literal_eval(val)
-
-            if type(evaluated_val) == str and evaluated_val == 'RANDOM_WALK_FIXED_RADIUS':
-                evaluated_val = 'RANDOM_WALK_SKIN'
-
-            if type(evaluated_val) == str and evaluated_val == 'SHARP':
-                evaluated_val = 'GGX'
-
 
             for path in path_list[1:-1]:
                 if path.startswith("i-"):

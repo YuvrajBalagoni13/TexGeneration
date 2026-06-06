@@ -5,15 +5,16 @@ from transformers import AutoProcessor
 import wandb
 
 
-def log_metrics(epoch, iteration, loss):
-    print(f"epoch {epoch + 1} | iteration {iteration} | train loss - {loss:.2f}")
+def log_metrics(epoch, iteration, loss, lr):
+    print(f"epoch {epoch + 1} | iteration {iteration} | lr - {lr} | train loss - {loss:.2f} ")
     wandb.log({
         "epoch" : epoch,
         "iteration" : iteration,
-        "train loss" : loss
+        "train loss" : loss,
+        "lr" : lr
     })
 
-def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, log_wandb):
+def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, scheduler, log_wandb):
     print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
     checkpoint_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}"
     resume_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}_state"
@@ -32,6 +33,7 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, log
     os.makedirs(resume_directory, exist_ok=True)
 
     torch.save(optimizer.state_dict(), os.path.join(resume_directory, "optimizer.pth"))
+    torch.save(scheduler.state_dict(), os.path.join(resume_directory, "scheduler.pth"))
 
     torch.save({
         'epoch': epoch,
@@ -57,7 +59,7 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, log
         wandb.log_artifact(artifact)
     print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
-def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, optimizer_directory):
+def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory):
     print(f"------ Loading checkpoint from {checkpoint_directory} ------")
     
     model = PeftModel.from_pretrained(base_model, checkpoint_directory)
@@ -73,7 +75,10 @@ def load_checkpoint(base_model, processor, optimizer, checkpoint_directory, opti
         torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
         map_location='cuda')  
     )
-    
+    scheduler.load_state_dict(
+        torch.load(os.path.join(optimizer_directory, "scheduler.pth"),
+        map_location='cuda')
+    )
     state = torch.load(os.path.join(optimizer_directory, "training_state.pth"))
     epoch = state['epoch']
     iteration = state['iteration']

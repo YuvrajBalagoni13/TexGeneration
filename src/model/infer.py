@@ -28,6 +28,7 @@ def main(
     sample_list = random.sample(dataset.samples, data_length)
 
     dataset_list = []
+    results = {}
     for sample in sample_list:
       dataset_list.append(sample['image'])
 

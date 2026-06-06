@@ -7,6 +7,8 @@ unsloth_compiled_cache/
 grouptxt/
 material_dataset_filtered/
 RenderedOutputs/
+result_inference_json/
+ShaderDatasetDistributionPlots/
 model_ckpts/
 /Test.blend
 /Test.blend1

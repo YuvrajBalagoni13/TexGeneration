@@ -179,5 +179,5 @@ p95                  904.0      751.0
 <=512 %              37.1%      67.4%
 <=1024 %             97.7%      98.7%
 
-Avg token reduction: 110.1 tokens/sample
+Avg token reduction: 110.1 tokens/sample after adding new tokens
 """

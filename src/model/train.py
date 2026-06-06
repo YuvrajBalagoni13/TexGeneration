@@ -18,6 +18,7 @@ import json
 from torch.amp import autocast, GradScaler
 from unsloth import FastVisionModel
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from .dataset import ShaderDataset
 from .embeddings import NewTokenEmbeddings, NewTokenOutput
@@ -61,6 +62,7 @@ def shader_collate_fn(batch, pad_token_id = 0):
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
         quantize = False,
+        mean_subwords = False,
         epochs = 5,
         batch_size = 2,
         lr = 1e-5,
@@ -81,8 +83,8 @@ def main(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
-    precision_type = torch.float16
+    precision_type = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+    # precision_type = torch.float16
 
     model, processor = FastVisionModel.from_pretrained(
        model_name = "unsloth/Qwen3.5-0.8B",
@@ -128,7 +130,7 @@ def main(
             old_vocab_size = old_vocab_size,
             embed_dim = 1024,
             tokenizer = processor.tokenizer,
-            mean_subwords = True,
+            mean_subwords = mean_subwords,
             subwords_id_list = subwords_id_list,
             new_tokens = new_tokens
         )
@@ -137,7 +139,7 @@ def main(
             embed_dim = 1024,
             old_vocab_size = old_vocab_size,
             tokenizer = processor.tokenizer,
-            mean_subwords = True,
+            mean_subwords = mean_subwords,
             subwords_id_list = subwords_id_list,
             new_tokens = new_tokens
         )
@@ -224,11 +226,13 @@ def main(
     else:
         trainable_params = [p for p in model.parameters() if p.requires_grad]
         model_optimizer = torch.optim.Adam(trainable_params, lr=lr, fused=True)
+    
+    scheduler = ReduceLROnPlateau(optimizer=model_optimizer, mode='min', patience=20)
 
     start_epoch = 0
     start_batch_idx = 0
     if load_ckpt_dir and load_state_dir:
-        model, processor, model_optimizer, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, load_ckpt_dir, load_state_dir)
+        model, processor, model_optimizer, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir)
 
     total_epochs = epochs
     ACCUMULATION_INTERVAL = gradient_accumulation
@@ -276,15 +280,16 @@ def main(
                     print(f"Gradients having issue, Skipping step ...")
                     model_optimizer.zero_grad()
                 model_optimizer.step()
+                scheduler.step(batch_loss.item() * ACCUMULATION_INTERVAL)
                 model_optimizer.zero_grad()
 
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
 
             if batch_idx % 5 == 0:
-                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL)
+                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[0])
 
             if batch_idx % 250 == 0 and batch_idx != 0:
-                save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, True)
+                save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, scheduler, True)
 
         loss = loss / len(training_dataloader)
         print(f"total loss - {loss} after epochs - {total_epochs}")
@@ -328,6 +333,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--quantize",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--mean_subwords",
         action="store_true",
         default=False
     )
@@ -400,6 +410,7 @@ if __name__ == "__main__":
     main(
         run_name = args.run_name,
         quantize = args.quantize,
+        mean_subwords = args.mean_subwords,
         epochs = args.epochs,
         batch_size = args.batch_size,
         lr = args.lr,
@@ -418,6 +429,7 @@ if __name__ == "__main__":
 python -m TexGeneration.src.model.train \
 --run_name Qwen3.5_0.8B_run_2.2 \
 --quantize \
+--mean_subwords \
 --epochs 5 \
 --batch_size 2 \
 --lr 1e-5 \
