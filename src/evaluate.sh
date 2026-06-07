@@ -1,74 +1,92 @@
 #!/bin/bash
-# evaluate.sh
+set -e
 
-DATA_PATH="lora_0.1_eval/train_eval"
-MODEL_PATH="model_ckpts/run_0.1_lora"
-JSON_PATH="lora_0.1_eval/train_response_run_0.1_response_01.json"
-ENDPOINT="https://ffc95aec1330d2d20a.gradio.live/"
+MODEL_BASE=""
+LORA_PATH=""
+EVAL_DATA_PATH=""
+OUTPUT_JSON_PATH=""
+RESULT_JSON_PATH=""
+RENDER_PATH=""
+DATA_LENGTH=100
+BATCH_SIZE=4
+BATCH_PROCESS=false
+NEW_TOKENS=false
+QUANTIZE=false
 
-# usage() {
-#     echo "Usage: $0 [OPTIONS]"
-#     echo ""
-#     echo "Options:"
-#     echo "  --data-path       PATH    Input data path         (default: $DATA_PATH)"
-#     echo "  --model-path      PATH    Model ckpt path         (default: $MODEL_PATH)"
-#     echo "  --json-path       PATH    Inference output JSON   (default: $JSON_PATH)"
-#     echo "  --endpoint        PATH    gradio endpoint         (default: $ENDPOINT)"
-#     echo "  -h, --help                Show this help message"
-#     exit 1
-# }
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --model_base)
+            MODEL_BASE="$2"
+            shift 2;;
+        --lora_path)
+            LORA_PATH="$2"
+            shift 2;;
+        --eval_data_path)
+            EVAL_DATA_PATH="$2"
+            shift 2;;
+        --output_json_path)
+            OUTPUT_JSON_PATH="$2"
+            shift 2;;
+        --result_json_path)
+            RESULT_JSON_PATH="$2"
+            shift 2;;
+        --render_path)
+            RENDER_PATH="$2"
+            shift 2;;
+        --data_length)
+            DATA_LENGTH="$2"
+            shift 2;;
+        --batch_size)
+            BATCH_SIZE="$2"
+            shift 2;;
+        --quantize)
+            QUANTIZE=true
+            shift;;
+        --batch_process)
+            BATCH_PROCESS=true
+            shift;;          
+        --new_tokens)
+            NEW_TOKENS=true
+            shift;;
+        *)
+            echo "Unknown argument: $1"
+            exit 1;;
+    esac
+done
 
-# while [[ $# -gt 0 ]]; do
-#     case "$1" in
-#         --data-path)
-#             DATA_PATH="$2"
-#             shift 2
-#             ;;
-#         --model-path)
-#             MODEL_PATH="$2"
-#             shift 2
-#             ;;
-#         --json-path)
-#             JSON_PATH="$2"
-#             shift 2
-#             ;;
-#         --endpoint)
-#             ENDPOINT="$2"
-#             shift 2
-#             ;;
-#         -h|--help)
-#             usage
-#             ;;
-#         *)
-#             echo "Unknown argument: $1"
-#             usage
-#             ;;
-#     esac
-# done
+BATCH_FLAG=""
+if [ "$BATCH_PROCESS" = true ]; then
+    BATCH_FLAG="--batch_process"
+fi
 
-# echo "--- Config ---"
-# echo "  Data path:      $DATA_PATH"
-# echo "  Model path:     $MODEL_PATH"
-# echo "  JSON path:      $JSON_PATH"
-# echo "  ENDPOINT:       $ENDPOINT"
-# echo ""
+QUANTIZE_FLAG=""
+if [ "$QUANTIZE" = true ]; then
+    QUANTIZE_FLAG="--quantize"
+fi 
 
-echo "---------- Inference ----------"
-python -m src.model.evaluate.infer \
-    --data_path "$DATA_PATH" \
-    --model_path "$MODEL_PATH" \
-    --save_json_path "$JSON_PATH" \
-    --gradio_endpoint "$ENDPOINT"
+NEW_TOKENS_FLAG=""
+if [ "$NEW_TOKENS" = true ]; then
+    NEW_TOKENS_FLAG="--new_tokens"
+fi
 
-echo "---------- Rendering ----------"
+python -m src.model.infer \
+--model_base "$MODEL_BASE" \
+--lora_path "$LORA_PATH" \
+--eval_data_path "$EVAL_DATA_PATH" \
+--save_json_path "$OUTPUT_JSON_PATH" \
+--data_length "$DATA_LENGTH" \
+--batch_size "$BATCH_SIZE \
+$QUANTIZE_FLAG \
+$BATCH_FLAG \
+$NEW_TOKEN_FLAG
+
 /mnt/Storage/ML/blender-5.1.0-linux-x64/blender \
-    --background \
-    --python src/model/evaluate/blender_render.py \
-    -- \
-    --save_json_path "$JSON_PATH"
+--background \
+--python src/model/renderer.py \
+-- \
+--result_json_path "$OUTPUT_JSON_PATH" \
+--save_json_path "$RESULT_JSON_PATH" \
+--render_path "$RENDER_PATH"
 
-echo "---------- Scoring ----------"
-python -m src.model.evaluate.similarity_score \
-    --save_json_path "$JSON_PATH"
-
-echo "--- Done ---"
+python -m src.model.similarity_score \
+--result_json_path "$RESULT_JSON_PATH"

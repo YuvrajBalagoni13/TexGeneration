@@ -10,6 +10,7 @@ RenderedOutputs/
 result_inference_json/
 ShaderDatasetDistributionPlots/
 model_ckpts/
+addon/
 /Test.blend
 /Test.blend1
 /VLMaterial.pdf

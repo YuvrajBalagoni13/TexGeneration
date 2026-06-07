@@ -62,13 +62,13 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, sch
 def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory):
     print(f"------ Loading checkpoint from {checkpoint_directory} ------")
     
-    model = PeftModel.from_pretrained(base_model, checkpoint_directory)
+    base_model.load_adapter(checkpoint_directory, adapter_name='default')
     processor = AutoProcessor.from_pretrained(checkpoint_directory)
     
-    model.get_input_embeddings().new_embeddings.load_state_dict(
+    base_model.get_input_embeddings().new_embeddings.load_state_dict(
         torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
     )
-    model.get_output_embeddings().new_lm_head.load_state_dict(
+    base_model.get_output_embeddings().new_lm_head.load_state_dict(
         torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
     )
     optimizer.load_state_dict(
@@ -84,4 +84,4 @@ def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_dire
     iteration = state['iteration']
     
     print(f"------ Resumed from epoch {epoch + 1}, iteration {iteration} ------")
-    return model, processor, optimizer, epoch, iteration
+    return base_model, processor, optimizer, scheduler, epoch, iteration

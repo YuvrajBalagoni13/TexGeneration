@@ -44,11 +44,10 @@ class UnslothInference:
             model_base,
             load_in_4bit = quantize,
             use_gradient_checkpointing = False,
-            max_seq_length = self.max_seq_length,
+            max_seq_length = self.max_seq_length + 350,
             dtype = self.precision_type
         )
-        self.model = PeftModel.from_pretrained(
-            self.model,
+        self.model.load_adapter(
             lora_path
         )
 
@@ -80,9 +79,8 @@ class UnslothInference:
         
         input_text = self.processor.apply_chat_template(self.message, add_generation_prompt = True)
         inputs = self.processor(
-            Image.open(image_path),
-            input_text,
-            add_special_tokens = False,
+            text = [input_text],
+            images = [Image.open(image_path)],
             return_tensors = "pt",
         ).to(self.device)
 
@@ -90,7 +88,7 @@ class UnslothInference:
             inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
 
         output = self.model.generate(**inputs, max_new_tokens = self.max_seq_length,
-                   use_cache = True, do_sample = True, temperature = 0.5, min_p = 0.1)
+                   use_cache = True, do_sample = True, temperature = 0.3, top_p = 0.95)
         input_length = inputs["input_ids"].shape[1]
         decoded = self.processor.decode(output[0][input_length:], skip_special_tokens=True)
         return decoded
@@ -182,8 +180,7 @@ class Inference:
         self.processor = AutoProcessor.from_pretrained(lora_path)
 
         if lora_path:
-            self.model = PeftModel.from_pretrained(
-                self.model,
+            self.model.load_adapter(
                 lora_path
             )
 
@@ -221,7 +218,6 @@ class Inference:
             text = [text],
             images = [image],
             return_tensors = "pt",
-            max_length = self.max_seq_length
         ).to(self.device)
 
         if "pixel_values" in inputs:
@@ -232,8 +228,9 @@ class Inference:
                 **inputs,
                 max_new_tokens = self.max_seq_length,
                 do_sample = True,
-                temperature = 0.5,
-                top_p = 0.95
+                temperature = 0.3,
+                top_p = 0.95,
+                eos_token_id=self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
             )
         
         input_length = inputs['input_ids'].shape[1]
@@ -257,7 +254,6 @@ class Inference:
             text = texts,
             images = images,
             return_tensors = "pt",
-            # max_length = self.max_seq_length
         ).to(self.device)
 
         if "pixel_values" in inputs:
@@ -267,9 +263,9 @@ class Inference:
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens = self.max_seq_length,
-                do_sample = False,
-                temperature = 0.0,
-                repition_penalty = 1.1,
+                do_sample = True,
+                temperature = 0.3,
+                top_p = 0.95,
                 pad_token_id=self.processor.tokenizer.pad_token_id,
                 eos_token_id=self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
             )
@@ -282,9 +278,14 @@ class Inference:
         return results
     
 if __name__ == "__main__":
-    print("working!")
-    # inference = Inference()
-    # inference.infer(
-    #     image_path="Dataset/infinigen/bone/00000.jpg",
-    #     input_prompt="generate a blender procedural shader graph in a text based shader which is structured in the following way-\nN|node_variable_name:node_type_name;(rest of the nodes)\nP|node_property_path:value;(rest of the properties)\nL|output_node.out_socket>input_node.in_socket;(rest of the links)\nDon't write anything else only these 3 lines in the structure mentioned"
-    # )
+    # print("working!")
+    inference = UnslothInference(
+        model_base = "Unsloth/Qwen3.5-0.8B",
+        lora_path = "artifacts/texgen_lora_LoRA_token_main:v12/texgen_LoRA_token_main_1_1750",
+        quantize = True,
+        max_seq_length = 450,
+        device = 'cpu',
+        new_tokens = True
+    )
+    output = inference.infer(image_path="ShaderDataset/val/mat_llm/case_00000_gen_02/00001.jpg")
+    print(output)

@@ -19,6 +19,7 @@ def replace_in_file(file_path: str, old: str, new: str) -> None:
 dataset_path = Path("ShaderDataset")
 errors = {}
 errors['error_samples'] = []
+errors['file_issue'] = []
 
 text_shader_validator = TextShader()
 
@@ -27,6 +28,9 @@ print(len(images_list))
 total = 0
 for image in tqdm(images_list):
     text_path = image.with_suffix('.txt')
+    if not image.exists() or not text_path.exists():
+        print("doesn't exists :(")
+        errors['file_issue'].append(str(image))
     try:
         mat = text_shader_validator.text_to_shader_graph(text_shader_path=text_path)
     except Exception as e:

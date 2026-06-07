@@ -18,7 +18,7 @@ import json
 from torch.amp import autocast, GradScaler
 from unsloth import FastVisionModel
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from transformers import get_cosine_schedule_with_warmup
 
 from .dataset import ShaderDataset
 from .embeddings import NewTokenEmbeddings, NewTokenOutput
@@ -62,7 +62,7 @@ def shader_collate_fn(batch, pad_token_id = 0):
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
         quantize = False,
-        mean_subwords = False,
+        mean_subwords = True,
         epochs = 5,
         batch_size = 2,
         lr = 1e-5,
@@ -218,7 +218,7 @@ def main(
                     model_params.append(params)
 
         model_optimizer = torch.optim.AdamW([
-            {"params": embedding_params, "lr": lr * 0.01},
+            {"params": embedding_params, "lr": lr * 0.1},
             {"params": model_params, "lr": lr}
         ],
         fused = True
@@ -227,12 +227,18 @@ def main(
         trainable_params = [p for p in model.parameters() if p.requires_grad]
         model_optimizer = torch.optim.Adam(trainable_params, lr=lr, fused=True)
     
-    scheduler = ReduceLROnPlateau(optimizer=model_optimizer, mode='min', patience=20)
+    total_steps = 2500 
+    warmup_steps = int(total_steps * 0.01)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer=model_optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps
+    )
 
     start_epoch = 0
     start_batch_idx = 0
     if load_ckpt_dir and load_state_dir:
-        model, processor, model_optimizer, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir)
+        model, processor, model_optimizer, scheduler, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir)
 
     total_epochs = epochs
     ACCUMULATION_INTERVAL = gradient_accumulation
@@ -253,7 +259,7 @@ def main(
         model_optimizer.zero_grad()
         for batch_idx, current_batch in tqdm(enumerate(training_dataloader)):
 
-            if batch_idx < start_batch_idx:
+            if batch_idx < start_batch_idx + 1:
                 continue
 
             batch = {k : v.to(device)
@@ -280,9 +286,10 @@ def main(
                     print(f"Gradients having issue, Skipping step ...")
                     model_optimizer.zero_grad()
                 model_optimizer.step()
-                scheduler.step(batch_loss.item() * ACCUMULATION_INTERVAL)
+                scheduler.step()
                 model_optimizer.zero_grad()
-
+                
+            
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
 
             if batch_idx % 5 == 0:
