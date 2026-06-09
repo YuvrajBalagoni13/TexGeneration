@@ -69,6 +69,7 @@ if [ "$NEW_TOKENS" = true ]; then
     NEW_TOKENS_FLAG="--new_tokens"
 fi
 
+echo "----- Infering -----"
 python -m src.model.infer \
 --model_base "$MODEL_BASE" \
 --lora_path "$LORA_PATH" \
@@ -80,7 +81,8 @@ $QUANTIZE_FLAG \
 $BATCH_FLAG \
 $NEW_TOKEN_FLAG
 
-/mnt/Storage/ML/blender-5.1.0-linux-x64/blender \
+echo "----- Rendering -----"
+blender-5.1.0-linux-x64/blender \
 --background \
 --python src/model/renderer.py \
 -- \
@@ -88,5 +90,6 @@ $NEW_TOKEN_FLAG
 --save_json_path "$RESULT_JSON_PATH" \
 --render_path "$RENDER_PATH"
 
+echo "----- Scoring -----"
 python -m src.model.similarity_score \
 --result_json_path "$RESULT_JSON_PATH"

@@ -19,7 +19,7 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, sch
     checkpoint_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}"
     resume_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}_state"
     os.makedirs(checkpoint_directory, exist_ok=True)
-    model.save_pretrained(checkpoint_directory)
+    model.save_pretrained(checkpoint_directory, save_embedding_layers=False)
     processor.save_pretrained(checkpoint_directory)
     
     torch.save(

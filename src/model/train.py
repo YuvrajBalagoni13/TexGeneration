@@ -110,9 +110,6 @@ def main(
             subwords_id_list.append(subwords_id)
         
         processor.tokenizer.add_tokens(new_tokens)
-        # processor.tokenizer.add_special_tokens({
-        #     "additional_special_tokens" : tokens_dict["special_tokens"]
-        # })
 
         # untying the weights
         if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
@@ -293,7 +290,7 @@ def main(
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
 
             if batch_idx % 5 == 0:
-                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[0])
+                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[1])
 
             if batch_idx % 250 == 0 and batch_idx != 0:
                 save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, scheduler, True)
