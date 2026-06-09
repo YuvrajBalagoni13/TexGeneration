@@ -110,14 +110,17 @@ def main(
             subwords_id_list.append(subwords_id)
         
         processor.tokenizer.add_tokens(new_tokens)
+        # processor.tokenizer.add_special_tokens({
+        #     "additional_special_tokens" : tokens_dict["special_tokens"]
+        # })
 
         # untying the weights
-        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
-          print("Weights are tied ...")
-          model.lm_head.weight = nn.Parameter(
-              model.get_output_embeddings().weight.clone()
-          )
-          model.lm_head.weight.requires_grad_(False)
+        # if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+        #   print("Weights are tied ...")
+        #   model.lm_head.weight = nn.Parameter(
+        #       model.get_output_embeddings().weight.clone()
+        #   )
+        #   model.lm_head.weight.requires_grad_(False)
 
         input_embeddings = model.get_input_embeddings()
         output_lm_head = model.get_output_embeddings()
@@ -141,6 +144,8 @@ def main(
             new_tokens = new_tokens
         )
 
+        new_lm_head.new_lm_head.weight = new_embedding_layer.new_embeddings.weight
+
         new_vocab_size = len(processor.tokenizer)
         model.config.vocab_size = new_vocab_size
         model.config.text_config.vocab_size = new_vocab_size
@@ -148,6 +153,9 @@ def main(
 
         model.set_input_embeddings(new_embedding_layer)
         model.set_output_embeddings(new_lm_head)
+
+        if model.get_input_embeddings().new_embeddings.weight.ptr() == model.get_output_embeddings().new_lm_head.weight.ptr():
+            print(f"----- Successfully tied new embeddings & new lm head -----")
 
         new_embedding_layer.to(precision_type).to(device)
         new_lm_head.to(precision_type).to(device)
