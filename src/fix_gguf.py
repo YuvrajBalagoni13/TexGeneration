@@ -33,4 +33,3 @@
 # for key in patches:
 #     field = r.fields[key]
 #     print(f"{key} = {field.parts[field.data[0]][0]}")
- 
