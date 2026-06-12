@@ -200,9 +200,8 @@ def main(
 
     # -- Dataset Loading ------------------------- #
 
-    # using 768 as max seq length because p95 of data distribution is 751 - can refer to token_analysis.png
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=450, skip_over_length=True)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=450, skip_over_length=True)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=450, skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=450, skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=False)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
@@ -303,37 +302,35 @@ def main(
             if batch_idx % 250 == 0 and batch_idx != 0:
                 save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, scheduler, True)
 
+            # -- Evaluation ------------------------ #
+            if batch_idx % 2500 == 0 and batch_idx != 0:
+                model.eval()
+                eval_loss = 0
+                with torch.no_grad():
+                    for eval_idx, eval_batch in enumerate(tqdm(testing_dataloader)):
+                        if eval_idx > 50:
+                            break
+                        batch = {k : v.to(device)
+                                for k, v in eval_batch.items()}
+
+                        labels = batch.pop("labels")
+
+                        with autocast('cuda', dtype = precision_type):
+                            eval_outputs = model(**batch)
+                            logits = eval_outputs.logits
+
+                            shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
+                            shift_labels = labels[..., 1:].contiguous().view(-1)
+                            eval_batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
+
+                        eval_loss += eval_batch_loss.item()
+
+                        if eval_idx % 5 == 0:
+                            log_metrics(epoch=epoch, iteration=eval_idx, loss=eval_batch_loss.item(), train=False)
+
+                
         loss = loss / len(training_dataloader)
         print(f"total loss - {loss} after epochs - {total_epochs}")
-
-        # -- Evaluation ------------------------ #
-
-        model.eval()
-        eval_loss = 0
-        with torch.no_grad():
-            for eval_batch in tqdm(testing_dataloader):
-                batch = {k : v.to(device)
-                         for k, v in eval_batch.items()}
-                
-                labels = batch.pop("labels")
-
-                with autocast('cuda', dtype = precision_type):
-                    eval_outputs = model(**batch)
-                    logits = eval_outputs.logits
-
-                    shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
-                    shift_labels = labels[..., 1:].contiguous().view(-1)
-                    eval_batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
-
-                eval_loss += eval_batch_loss.item()
-
-            wandb.log({
-                "epoch" : epoch,
-                "eval loss" : eval_loss / len(testing_dataloader)
-            })
-
-            print(f"Epoch {epoch} | evaluation loss - {eval_loss}")
-
         save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
 
 if __name__ == "__main__":

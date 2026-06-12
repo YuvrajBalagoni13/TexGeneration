@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from PIL import Image
 from tqdm.auto import tqdm
+import json
 
 
 class ShaderDataset(Dataset):
@@ -13,7 +14,9 @@ class ShaderDataset(Dataset):
             dataset_dir: str = "Dataset",
             tokenizer_and_processor: any = None,
             max_seq_length : int = 2048,
-            skip_over_length : bool = False
+            skip_over_length : bool = False,
+            sample_json_path : str = None,
+            train : bool = True
     ) -> None:
         super().__init__()
         self.samples = []
@@ -25,34 +28,47 @@ class ShaderDataset(Dataset):
         skipped = 0
         all_pairs = []
 
-        # collect all image-shader pairs
-        for style_dir in self.dataset_path.iterdir():
-            if style_dir.is_dir():
-                for image_path in style_dir.rglob("*.jpg"):
-                    shader_path = image_path.with_suffix(".txt")
-                    if shader_path.exists():
-                        all_pairs.append({
-                            "image":  image_path,
-                            "shader": shader_path
-                        })
+        if sample_json_path:
+            with open(sample_json_path, "r") as f:
+                sample_dict = json.load(f)
 
-        if not all_pairs:
-            raise RuntimeError(f"No valid image-shader pairs found in {dataset_dir}")
+            samples_list = sample_dict['train' if train else 'val']
+            for sample in samples_list:
+                self.samples.append({
+                    'image' : Path(sample['image'][1:-1]),
+                    'shader' : Path(sample['shader'][1:-1])
+                })
+            print(f"--- Dataset Initialized: {len(self.samples)} pairs found ---")
 
-        # filter by length if skip_over_length is True
-        if skip_over_length:
-            for pair in tqdm(all_pairs, desc="Filtering by length"):
-                with open(pair["shader"], "r") as f:
-                    shader_text = f.read()
-                token_len = len(self.processor.tokenizer.tokenize(shader_text))
-                if token_len <= max_seq_length:
-                    self.samples.append(pair)
-                else:
-                    skipped += 1
         else:
-            self.samples = all_pairs
+            # collect all image-shader pairs
+            for style_dir in self.dataset_path.iterdir():
+                if style_dir.is_dir():
+                    for image_path in style_dir.rglob("*.jpg"):
+                        shader_path = image_path.with_suffix(".txt")
+                        if shader_path.exists():
+                            all_pairs.append({
+                                "image":  image_path,
+                                "shader": shader_path
+                            })
 
-        print(f"--- Dataset Initialized: {len(self.samples)} pairs found | {skipped} skipped (over {max_seq_length} tokens) ---")
+            if not all_pairs:
+                raise RuntimeError(f"No valid image-shader pairs found in {dataset_dir}")
+
+            # filter by length if skip_over_length is True
+            if skip_over_length:
+                for pair in tqdm(all_pairs, desc="Filtering by length"):
+                    with open(pair["shader"], "r") as f:
+                        shader_text = f.read()
+                    token_len = len(self.processor.tokenizer.tokenize(shader_text))
+                    if token_len <= max_seq_length:
+                        self.samples.append(pair)
+                    else:
+                        skipped += 1
+            else:
+                self.samples = all_pairs
+
+            print(f"--- Dataset Initialized: {len(self.samples)} pairs found | {skipped} skipped (over {max_seq_length} tokens) ---")
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -71,13 +87,7 @@ class ShaderDataset(Dataset):
                 "role": "user",
                 "content": [
                     {"type": "image"},
-                    {"type": "text", "text": (
-                     "Generate a text based shader graph in the following format -\n"
-                     "N|node_name:node_type;...\n"
-                     "P|node_name.property_path:value;...\n"
-                     "L|node_name.output_socket>node_name.input_socket;...\n"
-                     "Here N| represents nodes, P| tells properties & L| tells links."
-                     )},
+                    {"type": "text", "text": "Generate a text based shader graph based on the given input image"},
                 ]
             },
             {

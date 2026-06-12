@@ -16,7 +16,7 @@ class PatchedQwen35ChatHandler(Qwen35ChatHandler):
     .replace("{{- raise_exception('System message must be at the beginning.') -}}", "") \
     .replace("{{- raise_exception('Unexpected message role.') -}}", "")
     CHAT_FORMAT = PATCHED_TEMPLATE 
-
+    DEFAULT_SYSTEM_MESSAGE = ""
 
 class GGUFInference:
     def __init__(
@@ -41,7 +41,6 @@ class GGUFInference:
             self.chat_handler = PatchedQwen35ChatHandler(
                 clip_model_path = mmproj_path,
                 enable_thinking = False,
-                # image_min_tokens=1024,
                 verbose = verbose
             )
         else:

@@ -10,6 +10,7 @@ RenderedOutputs/
 result_inference_json/
 ShaderDatasetDistributionPlots/
 model_ckpts/
+model_gguf/
 addon/
 /Test.blend
 /Test.blend1

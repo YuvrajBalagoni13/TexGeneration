@@ -137,8 +137,8 @@ class Renderer:
         bpy.context.scene.render.filepath = str(render_path)
         bpy.ops.render.render(write_still=True)
         
-        self.text_shader_converter.cleanup_material()
         if clean_material:
+            self.text_shader_converter.cleanup_material()
             self.current_mesh.data.materials.clear()
         self.purge_orphan_data()
 

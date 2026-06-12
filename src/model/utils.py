@@ -5,14 +5,28 @@ from transformers import AutoProcessor
 import wandb
 
 
-def log_metrics(epoch, iteration, loss, lr):
-    print(f"epoch {epoch + 1} | iteration {iteration} | lr - {lr} | train loss - {loss:.2f} ")
-    wandb.log({
-        "epoch" : epoch,
-        "iteration" : iteration,
-        "train loss" : loss,
-        "lr" : lr
-    })
+def log_metrics(
+        epoch : int = None, 
+        iteration : int = None, 
+        loss : float = None, 
+        lr : float = None, 
+        train : bool = True):
+    if train:
+        print(f"epoch {epoch + 1} | iteration {iteration} | lr - {lr} | train loss - {loss:.2f} ")
+        wandb.log({
+            "epoch" : epoch,
+            "iteration" : iteration,
+            "train loss" : loss,
+            "lr" : lr
+        })
+    else:
+        print(f"epoch {epoch + 1} | eval iteration {iteration} | eval loss - {loss:.2f} ")
+        wandb.log({
+            "epoch" : epoch,
+            "eval iteration" : iteration,
+            "eval loss" : loss
+        })
+        
 
 def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, scheduler, log_wandb):
     print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
