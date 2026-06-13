@@ -41,7 +41,6 @@ class ShaderDataset(Dataset):
             print(f"--- Dataset Initialized: {len(self.samples)} pairs found ---")
 
         else:
-            # collect all image-shader pairs
             for style_dir in self.dataset_path.iterdir():
                 if style_dir.is_dir():
                     for image_path in style_dir.rglob("*.jpg"):
@@ -55,7 +54,6 @@ class ShaderDataset(Dataset):
             if not all_pairs:
                 raise RuntimeError(f"No valid image-shader pairs found in {dataset_dir}")
 
-            # filter by length if skip_over_length is True
             if skip_over_length:
                 for pair in tqdm(all_pairs, desc="Filtering by length"):
                     with open(pair["shader"], "r") as f:
@@ -76,12 +74,10 @@ class ShaderDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         sample = self.samples[idx]
         
-        # loading image & text
         image = Image.open(sample["image"]).convert("RGB")
         with open(sample["shader"], "r") as f:
             shader_text = f.read()
 
-        # main conversation
         conversation = [
             {
                 "role": "user",
@@ -98,7 +94,6 @@ class ShaderDataset(Dataset):
             }
         ] 
 
-        # Entire conversation
         full_text = self.processor.apply_chat_template(
             conversation,
             tokenize = False,
@@ -116,8 +111,6 @@ class ShaderDataset(Dataset):
             text = full_text,
             images = image,
             return_tensors = "pt",
-            # truncation = True,
-            # max_length = self.max_seq_length,
             padding = False
         )
 
@@ -125,8 +118,6 @@ class ShaderDataset(Dataset):
             text = prompt_only,
             images = image,
             return_tensors = "pt",
-            # truncation = True,
-            # max_length = self.max_seq_length,
             padding = False
         )
 

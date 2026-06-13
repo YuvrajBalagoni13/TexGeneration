@@ -1,0 +1,19 @@
+model_base: Qwen3.5-0.8B
+lr: 5e-5
+lr_embeds: 5e-6
+batch_size: 4
+gradient_accumulation: 4
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.0
+precision: torch.float16
+warmup_steps: 25
+seed: 42
+epochs: 5
+add_new_tokens: True
+tokens_json_path : "/content/drive/MyDrive/ShaderDataset/addition_tokens.json"
+mean_subwords: True
+max_seq_length: 800
+max_output_tokens: 450
+rslora: True
+quantize: False

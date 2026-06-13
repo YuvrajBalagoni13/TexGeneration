@@ -63,7 +63,8 @@ def main(eval_result_path = "results_info_temp_0_3_top_p_0_95.json"):
     avg_score /= (len(results) - shader_count - no_of_errors)
     results['metadata'] = {
         'avg_score' : avg_score,
-        'no_of_errors' : no_of_errors
+        'no_of_errors' : no_of_errors,
+        'performance_model' : avg_score * (1 - (no_of_errors / len(results)))
     }
 
     print(f"avg_score : {avg_score}")

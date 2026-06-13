@@ -19,7 +19,7 @@ class NewTokenEmbeddings(nn.Module):
         self.old_embeddings.requires_grad_(False)
 
         self.num_new_tokens = len(new_tokens)
-        self.new_embeddings = nn.Embedding(self.num_new_tokens, embed_dim) # [237, 1024]
+        self.new_embeddings = nn.Embedding(self.num_new_tokens, embed_dim) # [233, 1024]
         print(f"old vocab size - {self.old_vocab_size}")
         print(f"new token size - {self.num_new_tokens}")
 

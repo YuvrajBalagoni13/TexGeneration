@@ -19,6 +19,7 @@ from torch.amp import autocast, GradScaler
 from unsloth import FastVisionModel
 import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
+import yaml
 
 from .dataset import ShaderDataset
 from .embeddings import NewTokenEmbeddings, NewTokenOutput
@@ -61,23 +62,27 @@ def shader_collate_fn(batch, pad_token_id = 0):
 
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
-        quantize = False,
-        mean_subwords = True,
-        epochs = 5,
-        batch_size = 2,
-        lr = 1e-5,
-        lora = True,
-        lora_r = 32,
-        lora_alpha = 64,
-        gradient_accumulation = 8,
+        # quantize = False,
+        # mean_subwords = True,
+        # epochs = 5,
+        # batch_size = 2,
+        # lr = 1e-5,
+        # lora = True,
+        # lora_r = 32,
+        # lora_alpha = 64,
+        # gradient_accumulation = 8,
+        config_yaml = "",
         load_ckpt_dir = "",
         load_state_dir = "",
-        add_new_tokens = False,
-        tokens_json_path = "",
-        seed = 42
+        # add_new_tokens = False,
+        # tokens_json_path = "",
+        # seed = 42
 
 ) -> None:
-    seed_everything(seed)
+    with open(config_yaml, "r") as f:
+        config = yaml.safe_load(f)
+
+    seed_everything(config['seed'])
     
    # -- Model Loading (Unsloth) ----------------------------- #
 
@@ -88,16 +93,34 @@ def main(
 
     model, processor = FastVisionModel.from_pretrained(
        model_name = "unsloth/Qwen3.5-0.8B",
-       load_in_4bit = quantize,
+       load_in_4bit = config['quantize'],
        use_gradient_checkpointing = True,
-       max_seq_length = 800,
+       max_seq_length = config['max_seq_length'],
        dtype = precision_type
     )
 
+    # -- LoRA Initialization ------------------------------ #
+
+    model = FastVisionModel.get_peft_model(
+       model, 
+       finetune_vision_layers = True,
+       finetune_language_layers = True,
+       finetune_attention_modules = True,
+       finetune_mlp_modules = True,
+       r = config['lora_r'],
+       lora_alpha = config['lora_alpha'],
+       lora_dropout = config['lora_dropout'],
+       bias = "none",
+       random_state = 3697,
+       use_rslora = config['rslora'],
+    ).to(device)
+    print("------- LoRA Trainable parameters -------")
+    model.print_trainable_parameters()
+
     # -- Get Input Embeddings & LM Head --------------------- #
 
-    if add_new_tokens:
-        with open(tokens_json_path, "r") as f:
+    if config['add_new_tokens']:
+        with open(config['tokens_json_path'], "r") as f:
             tokens_dict = json.load(f)
 
         old_vocab_size = len(processor.tokenizer)
@@ -115,12 +138,12 @@ def main(
         # })
 
         # untying the weights
-        # if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
-        #   print("Weights are tied ...")
-        #   model.lm_head.weight = nn.Parameter(
-        #       model.get_output_embeddings().weight.clone()
-        #   )
-        #   model.lm_head.weight.requires_grad_(False)
+        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+          print("Weights are tied ...")
+          model.lm_head.weight = nn.Parameter(
+              model.get_output_embeddings().weight.clone()
+          )
+          model.lm_head.weight.requires_grad_(False)
 
         input_embeddings = model.get_input_embeddings()
         output_lm_head = model.get_output_embeddings()
@@ -130,7 +153,7 @@ def main(
             old_vocab_size = old_vocab_size,
             embed_dim = 1024,
             tokenizer = processor.tokenizer,
-            mean_subwords = mean_subwords,
+            mean_subwords = config['mean_subwords'],
             subwords_id_list = subwords_id_list,
             new_tokens = new_tokens
         )
@@ -139,12 +162,12 @@ def main(
             embed_dim = 1024,
             old_vocab_size = old_vocab_size,
             tokenizer = processor.tokenizer,
-            mean_subwords = mean_subwords,
+            mean_subwords = config['mean_subwords'],
             subwords_id_list = subwords_id_list,
             new_tokens = new_tokens
         )
 
-        new_lm_head.new_lm_head.weight = new_embedding_layer.new_embeddings.weight
+        # new_lm_head.new_lm_head.weight = new_embedding_layer.new_embeddings.weight
 
         new_vocab_size = len(processor.tokenizer)
         model.config.vocab_size = new_vocab_size
@@ -154,8 +177,8 @@ def main(
         model.set_input_embeddings(new_embedding_layer)
         model.set_output_embeddings(new_lm_head)
 
-        if model.get_input_embeddings().new_embeddings.weight.ptr() == model.get_output_embeddings().new_lm_head.weight.ptr():
-            print(f"----- Successfully tied new embeddings & new lm head -----")
+        # if model.get_input_embeddings().new_embeddings.weight.data_ptr() == model.get_output_embeddings().new_lm_head.weight.data_ptr():
+        #     print(f"----- Successfully tied new embeddings & new lm head -----")
 
         new_embedding_layer.to(precision_type).to(device)
         new_lm_head.to(precision_type).to(device)
@@ -166,33 +189,13 @@ def main(
             config_class.vocab_size = property(
                 lambda self: self.text_config.vocab_size
             )
-
-    # -- LoRA Initialization ------------------------------ #
-
-    if lora:
-        model = FastVisionModel.get_peft_model(
-           model, 
-           finetune_vision_layers = True,
-           finetune_language_layers = True,
-           finetune_attention_modules = True,
-           finetune_mlp_modules = True,
-           r = lora_r,
-           lora_alpha = lora_alpha,
-           lora_dropout = 0,
-           bias = "none",
-           random_state = 3697,
-           use_rslora = True,
-        ).to(device)
-        print("------- LoRA Trainable parameters -------")
-        model.print_trainable_parameters()
     
-    if add_new_tokens:
-      model.get_input_embeddings().new_embeddings.requires_grad_(True)
-      model.get_output_embeddings().new_lm_head.requires_grad_(True)
+        model.get_input_embeddings().new_embeddings.requires_grad_(True)
+        model.get_output_embeddings().new_lm_head.requires_grad_(True)
 
-      model.enable_input_require_grads()
-      model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-      print("------- Tokens Trainable parameters enabled & checkpointed -------")
+        model.enable_input_require_grads()
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        print("------- Tokens Trainable parameters enabled & checkpointed -------")
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -200,18 +203,18 @@ def main(
 
     # -- Dataset Loading ------------------------- #
 
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=450, skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=True)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=450, skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=False)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=config['max_output_tokens'], skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=config['max_output_tokens'], skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=False)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
     generator = torch.Generator()
-    generator.manual_seed(seed)
-    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
-    testing_dataloader = DataLoader(testing_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
+    generator.manual_seed(config['seed'])
+    training_dataloader = DataLoader(training_dataset, batch_size=config['batch_size'], shuffle=True, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
+    testing_dataloader = DataLoader(testing_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn, generator=generator, num_workers=2, pin_memory=True)
     
     # -- Training ------------------------------- #
-    if add_new_tokens:
+    if config['add_new_tokens']:
         embedding_params = []
         model_params = []
         for name, params in model.named_parameters():
@@ -222,17 +225,17 @@ def main(
                     model_params.append(params)
 
         model_optimizer = torch.optim.AdamW([
-            {"params": embedding_params, "lr": lr * 0.1},
-            {"params": model_params, "lr": lr}
+            {"params": embedding_params, "lr": config['lr_embeds']},
+            {"params": model_params, "lr": config['lr']}
         ],
         fused = True
         )
     else:
         trainable_params = [p for p in model.parameters() if p.requires_grad]
-        model_optimizer = torch.optim.Adam(trainable_params, lr=lr, fused=True)
+        model_optimizer = torch.optim.Adam(trainable_params, lr=config['lr'], fused=True)
     
     total_steps = 2500 
-    warmup_steps = int(total_steps * 0.01)
+    warmup_steps = config['warmup_steps']
     scheduler = get_cosine_schedule_with_warmup(
         optimizer=model_optimizer,
         num_warmup_steps=warmup_steps,
@@ -240,23 +243,15 @@ def main(
     )
 
     start_epoch = 0
-    start_batch_idx = 0
+    start_batch_idx = -1
     if load_ckpt_dir and load_state_dir:
         model, processor, model_optimizer, scheduler, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir)
 
-    total_epochs = epochs
-    ACCUMULATION_INTERVAL = gradient_accumulation
+    total_epochs = config['epochs']
+    ACCUMULATION_INTERVAL = config['gradient_accumulation']
 
-    wandb.init(project="TexGeneration", name=run_name, config = {
-        "epochs" : epochs,
-        "batch_size" : batch_size,
-        "lr" : lr,
-        "lora-r" : lora_r,
-        "lora-alpha" : lora_alpha,
-        "gradient accumulation" : gradient_accumulation
-    })
+    wandb.init(project="TexGeneration", name=run_name, config = config)
 
-    int_keys = {"input_ids", "attention_mask", "labels", "image_grid_thw", "mm_token_type_ids"}
     for epoch in range(start_epoch, total_epochs):
         model.train()
         loss = 0
@@ -341,48 +336,9 @@ if __name__ == "__main__":
         default="Qwen3.5_0.8B_run_2.0"
     )
     parser.add_argument(
-        "--quantize",
-        action="store_true",
-        default=False
-    )
-    parser.add_argument(
-        "--mean_subwords",
-        action="store_true",
-        default=False
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=5,
-        required=True
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=2,
-        required=True
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-5,
-        required=True
-    )
-    parser.add_argument(
-        "--lora_r",
-        type=int,
-        default=32
-    )
-    parser.add_argument(
-        "--lora_alpha",
-        type=int,
-        default=64
-    )
-    parser.add_argument(
-        "--gradient_accumulation",
-        type=int,
-        default=8,
-        required=True
+        "--config_yaml",
+        type=str,
+        default=""
     )
     parser.add_argument(
         "--load_ckpt_dir",
@@ -394,44 +350,25 @@ if __name__ == "__main__":
         type=str,
         default=""
     )
-    parser.add_argument(
-        "--add_new_tokens",
-        action="store_true",
-        default=False
-    )
-    parser.add_argument(
-        "--lora",
-        action="store_true",
-        default=False
-    )
-    parser.add_argument(
-        "--tokens_json_path",
-        type=str,
-        default=""
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42
-    )
     args = parser.parse_args()
 
     main(
         run_name = args.run_name,
-        quantize = args.quantize,
-        mean_subwords = args.mean_subwords,
-        epochs = args.epochs,
-        batch_size = args.batch_size,
-        lr = args.lr,
-        lora = args.lora,
-        lora_r = args.lora_r,
-        lora_alpha = args.lora_alpha,
-        gradient_accumulation = args.gradient_accumulation,
+        config_yaml = args.config_yaml,
+        # quantize = args.quantize,
+        # mean_subwords = args.mean_subwords,
+        # epochs = args.epochs,
+        # batch_size = args.batch_size,
+        # lr = args.lr,
+        # lora = args.lora,
+        # lora_r = args.lora_r,
+        # lora_alpha = args.lora_alpha,
+        # gradient_accumulation = args.gradient_accumulation,
         load_ckpt_dir = args.load_ckpt_dir,
         load_state_dir = args.load_state_dir,
-        add_new_tokens = args.add_new_tokens,
-        tokens_json_path = args.tokens_json_path,
-        seed = args.seed
+        # add_new_tokens = args.add_new_tokens,
+        # tokens_json_path = args.tokens_json_path,
+        # seed = args.seed
     )
 
 """
