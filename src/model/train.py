@@ -225,8 +225,8 @@ def main(
                     model_params.append(params)
 
         model_optimizer = torch.optim.AdamW([
-            {"params": embedding_params, "lr": config['lr_embeds']},
-            {"params": model_params, "lr": config['lr']}
+            {"params": embedding_params, "lr": float(config['lr_embeds'])},
+            {"params": model_params, "lr": float(config['lr'])}
         ],
         fused = True
         )
@@ -250,17 +250,18 @@ def main(
     total_epochs = config['epochs']
     ACCUMULATION_INTERVAL = config['gradient_accumulation']
 
-    wandb.init(project="TexGeneration", name=run_name, config = config)
+    wandb.init(project="TexGeneration", name=config['run_name'], config = config)
 
     for epoch in range(start_epoch, total_epochs):
-        model.train()
+        
         loss = 0
         model_optimizer.zero_grad()
         for batch_idx, current_batch in tqdm(enumerate(training_dataloader)):
 
             if batch_idx < start_batch_idx + 1:
                 continue
-
+            
+            model.train()
             batch = {k : v.to(device)
                     for k, v in current_batch.items()}
             

@@ -1,4 +1,5 @@
 model_base: Qwen3.5-0.8B
+run_name: LoRA_token_scheduler_0.1_scale_lr_embed_06
 lr: 5e-5
 lr_embeds: 5e-6
 batch_size: 4
