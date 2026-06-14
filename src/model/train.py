@@ -337,7 +337,7 @@ if __name__ == "__main__":
         default="Qwen3.5_0.8B_run_2.0"
     )
     parser.add_argument(
-        "--config_yaml",
+        "--config",
         type=str,
         default=""
     )
@@ -355,7 +355,7 @@ if __name__ == "__main__":
 
     main(
         run_name = args.run_name,
-        config_yaml = args.config_yaml,
+        config_yaml = args.config,
         # quantize = args.quantize,
         # mean_subwords = args.mean_subwords,
         # epochs = args.epochs,

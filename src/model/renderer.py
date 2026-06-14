@@ -231,7 +231,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--result_json_path",
+        "--output_json_path",
         type=str,
         help="JSON file with all the outputs from inference"
     )
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     args = parser.parse_args(argv)
     
     main(
-        result_json_path=args.result_json_path,
+        result_json_path=args.output_json_path,
         save_json_path=args.save_json_path,
         render_path=args.render_path
     )
@@ -258,7 +258,7 @@ if __name__ == "__main__":
   --background \
   --python src/model/renderer.py \
   -- \
-  --result_json_path result_inference_json/inference_outputs/temp_0_3_top_p_0_95.json \
+  --output_json_path result_inference_json/inference_outputs/temp_0_3_top_p_0_95.json \
   --save_json_path result_inference_json/results/results_info_temp_0_3_top_p_0_95.json \
   --render_path RenderedOutputs/temp_0_3_top_p_0_95
 """

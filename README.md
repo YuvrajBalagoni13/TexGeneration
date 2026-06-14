@@ -11,15 +11,6 @@ Input Image -> fine-tuned VLM -> DSL based shader -> addon creates the shader gr
 
 # Results / Examples
 
-
-# Key Highlight of project -
-- **Inverse Procedural Modelling** : Given an image the model will generate a shader graph corresponding to that image.
-- **Dataset** : Converted VLMaterial dataset (target was a python script for the material) into a Domain specific language for shader graph. Why & How in this doc [DATA.md](docs/DATA.md).
-- **Custom tokens** : added new additional domain specific tokens to the models tokenizer vocabulary for efficient shader representation. In details at [DATA.md](docs/DATA.md).
-- **Model** : did lora fine-tuning for Qwen3.5-0.8B model, also trained the additional embeddings for the new added tokens. Also untied the weights for the new embeddings & lm head as untying helped model performed & learned better than keeping them same. More info here [TRAIN.md](docs/TRAIN.md).
-- **Quantization** : Quantized the model into multiple precision (Q8_0, Q5_K_M, Q4_K_M) using llama.cpp in gguf format. Available at huggingface - [huggingface_link](https://huggingface.co/YuvrajB13/Qwen-3.5-0.8B-TexGen-GGUF/tree/main).
-- **Blender Addon** : Created a blender addon to use the model.
-
 # Usage 
 ### Installing Addon
 install the TexAddon.zip file from the repo & install it in blender by going -
@@ -43,6 +34,14 @@ So the addon will be present in the properties -> material panel
 ![alt text](docs/imgs/usage_addon.png)
 
 add model path if installed the model manually from huggingface or else the addon will install it for you & save it in huggingface cache.
+
+# Key Highlight of project -
+- **Inverse Procedural Modelling** : Given an image the model will generate a shader graph corresponding to that image.
+- **Dataset** : Converted VLMaterial dataset (target was a python script for the material) into a Domain specific language for shader graph. Why & How in this doc [DATA.md](docs/DATA.md).
+- **Custom tokens** : added new additional domain specific tokens to the models tokenizer vocabulary for efficient shader representation. In details at [DATA.md](docs/DATA.md).
+- **Model** : did lora fine-tuning for Qwen3.5-0.8B model, also trained the additional embeddings for the new added tokens. Also untied the weights for the new embeddings & lm head as untying helped model performed & learned better than keeping them same. More info here [TRAIN.md](docs/TRAIN.md).
+- **Quantization** : Quantized the model into multiple precision (Q8_0, Q5_K_M, Q4_K_M) using llama.cpp in gguf format. Available at huggingface - [huggingface_link](https://huggingface.co/YuvrajB13/Qwen-3.5-0.8B-TexGen-GGUF/tree/main).
+- **Blender Addon** : Created a blender addon to use the model.
 
 # Metrics
 
@@ -81,11 +80,115 @@ TexGeneration/
 │   ├── gguf_inference.py
 |   ├── txt_shader.py
 |   └── addon_environment.yml
-├── TexGen_Addon.zip                # Zip file of addon
+├── TexGen_Addon_.zip                # Zip file of addon
 ├── environment.yml               
 └── README.md
 ```
+## Scripts Usage
+1. ### Installing dependencies
+```bash
+git clone https://github.com/YuvrajBalagoni13/TexGeneration.git
+cd TexGeneration
+conda env create -f environment.yml
+conda activate TexGen
+```
+2. ### Training scripts
+    So for training we have a config file at [config/train.yaml](config/train.yaml).
+    training params -
+    | Parameter | Value |
+    |---|---|
+    | `model_base` | Qwen3.5-0.8B |
+    | `batch_size` | 4 |
+    | `gradient_accumulation` | 4 |
+    | `lora_r` | 32 |
+    | `lora_alpha` | 64 |
+    | `lora_dropout` | 0.0 |
+    | `precision` | float16 |
+    | `lr` | 5e-5 |
+    | `lr_embeds` | 5e-6 |
+    | `lr_scheduler` | cosine |
+    | `warmup_steps` | 25 |
+    | `add_new_tokens` | True |
+    | `mean_subwords` | True |
+    | `max_seq_length` | 800 |
+    | `max_output_tokens` | 450 |
+    | `filtered_train_data_len` | 117k samples |
+    | `filtered_val_data_len` | 16k samples |
+    | `rslora` | True |
+    | `quantize` | False |
+    Also refer [TRAIN.md](docs/TRAIN.md) for more details regarding them.
 
-# Limitations
+    training script - [train script](src/model/train.py)
+    ```bash
+    python -m src.model.train \
+    --run_name name_of_run_to_log_in_wandb \
+    --config config/train.yaml \  
+    --load_ckpt_dir path_to_saved_ckpt_directory \
+    --load_state_dir path_to_saved_training_state_directory
+    ```
+    This script will save model checkpoints for LoRA weights, new additional embeddings & new lm head weights in wandb with the training states (optimizer state, scheduler state) to continue training when interrupted.
+    As we have a lot of samples for training & google colab's T4 as our GPU & savior (T_T). So doing eval after an epoch will take a lot of time so this does evaluation every 2500 iterations in the dataset. 
+
+3. ### Evaluation Scripts
+    So evaluation during training tells us if the model is performing good based on it's output shader graph but what we want is to see if the model's generated shader graph generated texture similar to the input image or not.
+    For this we have few scripts to do evaluation based on the quality of the generated texture.
+    1. **Inference script** - [infer script](src/model/infer.py)
+    ```bash
+    python -m src.model.infer \
+    base_model Qwen/Qwen3.5-0.8B \
+    --lora_path path_to_saved_ckpt \
+    --eval_data_path path_to_eval_dataset \
+    --save_json_path path_to_save_outputs \
+    --data_length 1000 \                        # no of samples to do inference on.
+    --batch_process \                           # If to do batch process
+    --batch_size 128 \
+    --new_tokens                                # If added new tokens
+    ```
+    This was the main inference script to generated outputs for evaluation.
+    this will give a json path with json as - `{image_path : output}`.
+
+    2. **Rendering Script** - [renderer script](src/model/renderer.py)
+    ```bash 
+    blender \               # path where blender's executable is located
+    --background \          # to run blender in background
+    --python src/model/renderer.py \
+    -- \
+    --output_json_path output_json_from_inference \
+    --save_json_path path_to_save_resulted_json \
+    --render_path path_to_save_rendered_images
+    ```
+    This script will give another json which consists of image_path, shader_text_path, output shader from model, render path for target & output, errors if any occured.
+
+    3. **Metric** - [metric script](src/model/metrics.py)
+    ```bash
+    python -m src.model.metrics \
+    --result_json_path result_json_from_renderer
+    ```
+    This will add the metric scores for every samples.
+
+Alterenatively if want to run all together than -
+```bash
+bash scripts/run_eval.sh \
+  --model_base "Qwen/Qwen3.5-0.8B" \
+  --lora_path path_to_saved_ckpt \
+  --eval_data_path path_to_eval_dataset \
+  --output_json_path path_to_save_outputs \
+  --result_json_path path_to_save_resulted_json" \
+  --render_path path_to_save_rendered_images \
+  --data_length 100 \
+  --batch_process \
+  --batch_size 4 \
+  --new_tokens  
+```
+
+Also for normal inference of samples, best way is to use the addon itself [see addon section](#usage).
+
+# Current Limitations
+1. Imbalance with nodes in dataset.
+![alt text](docs/imgs/nodes_distribution.png)
+as we can see top 10 nodes occur 80+% of overall shaders.
+Now this issue comes from the original dataset itself. With better model & full fine-tuning the model will be able to adapt to this but with our constraint with resources, our model needs better quality dataset for more expressibility in the results.
 
 # Future Work & Ideas
+1. Generate a better quality dataset.
+2. Further train the model with Reinforcement Learning to align the output better with the input with similarity metrics as reward functions. Also our shader script gives specific errors where the model failed so we can use these errors to further structure the rewards to be token specific feedback.

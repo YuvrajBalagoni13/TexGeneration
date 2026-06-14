@@ -59,7 +59,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_base",
+        "--base_model",
         type=str,
         required=True,
         help="base model weights path if saved or download base model"
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     results = main(
-        model_base=args.model_base,
+        model_base=args.base_model,
         lora_path=args.lora_path,
         eval_data_path=args.eval_data_path,
         data_length=args.data_length,
@@ -123,7 +123,7 @@ if __name__ == "__main__":
 
 """
 python -m src.model.infer \
---model_base Qwen/Qwen3.5-0.8B \
+--base_model Qwen/Qwen3.5-0.8B \
 --lora_path lorapath \
 --eval_data_path datapath \
 --save_json_path jsonpath \

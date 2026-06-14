@@ -71,25 +71,25 @@ fi
 
 echo "----- Infering -----"
 python -m src.model.infer \
---model_base "$MODEL_BASE" \
+--base_model "$MODEL_BASE" \
 --lora_path "$LORA_PATH" \
 --eval_data_path "$EVAL_DATA_PATH" \
 --save_json_path "$OUTPUT_JSON_PATH" \
 --data_length "$DATA_LENGTH" \
---batch_size "$BATCH_SIZE \
+--batch_size "$BATCH_SIZE" \
 $QUANTIZE_FLAG \
 $BATCH_FLAG \
-$NEW_TOKEN_FLAG
+$NEW_TOKENS_FLAG
 
 echo "----- Rendering -----"
 blender-5.1.0-linux-x64/blender \
 --background \
 --python src/model/renderer.py \
 -- \
---result_json_path "$OUTPUT_JSON_PATH" \
+--output_json_path "$OUTPUT_JSON_PATH" \
 --save_json_path "$RESULT_JSON_PATH" \
 --render_path "$RENDER_PATH"
 
 echo "----- Scoring -----"
-python -m src.model.similarity_score \
+python -m src.model.metrics \
 --result_json_path "$RESULT_JSON_PATH"
