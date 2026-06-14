@@ -1,6 +1,6 @@
 import sys
 
-sys.path.append("/home/anaconda3/envs/TexGen/lib/python3.14/site-packages")
+# sys.path.append("/home/anaconda3/envs/TexGen/lib/python3.14/site-packages")
 
 from llama_cpp.llama_chat_format import Qwen35ChatHandler
 from llama_cpp import Llama
@@ -49,6 +49,7 @@ class GGUFInference:
             )
         else:
             try:
+                print("----- Downloading mmproj checkpoints -----")
                 self.chat_handler = PatchedQwen35ChatHandler.from_pretrained(
                     repo_id = model_repo,
                     filename = mmproj_file,
@@ -68,6 +69,7 @@ class GGUFInference:
             )
         else:
             try:
+                print("----- Downloading model checkpoints -----")
                 self.vlm = Llama.from_pretrained(
                     repo_id = model_repo,
                     filename = model_file,

@@ -1,0 +1,10 @@
+name: TexGenAddon
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+    - pillow
+    - "llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git"

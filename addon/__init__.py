@@ -20,16 +20,54 @@ from bpy.props import (
 from bpy.types import Panel, Operator, PropertyGroup
 
 
-# ── Import your classes ─────────────────────────────────────────────────────
+class ShaderGenPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
 
-try:
-    from gguf_inference import GGUFInference
-    from txt_shader import TextShader
+    env_site_packages: bpy.props.StringProperty(
+        name="Site-Packages Path",
+        default="",
+        subtype='DIR_PATH'
+    )
+
+    def draw(self, context):
+        self.layout.prop(self, "env_site_packages")
+        self.layout.operator("shadergenv.reload_modules")
+
+
+# ── Import your classes ─────────────────────────────────────────────────────
+MODULES_LOADED = False
+GGUFInference  = None
+TextShader     = None
+
+def load_modules():
+    global MODULES_LOADED, GGUFInference, TextShader
+
+    prefs    = bpy.context.preferences.addons[__name__].preferences
+    env_path = prefs.env_site_packages.strip()
+
+    # add to sys.path BEFORE importing gguf_inference
+    if env_path and env_path not in sys.path:
+        sys.path.append(env_path)
+        print(f"[ShaderGen] Added: {env_path}")
+
+    from .gguf_inference import GGUFInference
+    from .txt_shader import TextShader
+
     MODULES_LOADED = True
-    MODULES_ERROR  = ""
-except Exception as e:
-    MODULES_LOADED = False
-    MODULES_ERROR  = str(e)
+    print("[ShaderGen] Modules loaded!")
+
+
+class SHADERGENV_OT_reload_modules(bpy.types.Operator):
+    bl_idname = "shadergenv.reload_modules"
+    bl_label  = "Reload Modules"
+
+    def execute(self, context):
+        try:
+            load_modules()
+            self.report({'INFO'}, "Modules loaded!")
+        except Exception as e:
+            self.report({'ERROR'}, str(e))
+        return {'FINISHED'}
 
 
 # ── Precision options ───────────────────────────────────────────────────────
@@ -87,28 +125,6 @@ class ShaderGenProperties(PropertyGroup):
 
 # ── Operators ───────────────────────────────────────────────────────────────
 
-#class SHADERGENV_OT_NewMaterial(Operator):
-#    bl_idname      = "shadergenv.new_material"
-#    bl_label       = "New Material"
-#    bl_description = "Create and assign a new material to the active object"
-
-#    def execute(self, context):
-#        obj = context.object
-#        if obj is None:
-#            self.report({"ERROR"}, "No active object")
-#            return {"CANCELLED"}
-
-#        mat = bpy.data.materials.new(name="ShaderGen_Material")
-#        mat.use_nodes = True
-
-#        if obj.data.materials:
-#            obj.data.materials[0] = mat
-#        else:
-#            obj.data.materials.append(mat)
-
-#        self.report({"INFO"}, f"Created: {mat.name}")
-#        return {"FINISHED"}
-
 
 class SHADERGENV_OT_SetPrecision(Operator):
     bl_idname      = "shadergenv.set_precision"
@@ -130,6 +146,8 @@ class SHADERGENV_OT_Generate(Operator):
         props = context.scene.shadergenv_props
         props.status_message = message
         props.status_ok      = ok
+        for area in context.screen.areas:
+            area.tag_redraw()
 
     def execute(self, context):
         props = context.scene.shadergenv_props
@@ -138,7 +156,7 @@ class SHADERGENV_OT_Generate(Operator):
 
         # ── Validate ────────────────────────────────────────
         if not MODULES_LOADED:
-            self.report({"ERROR"}, f"Modules not loaded: {MODULES_ERROR}")
+            self.report({"ERROR"}, f"Modules not loaded")
             return {"CANCELLED"}
 
         if not props.image_path:
@@ -154,28 +172,41 @@ class SHADERGENV_OT_Generate(Operator):
             self.report({"ERROR"}, "No model folder selected")
             return {"CANCELLED"}
 
-        model_path = get_model_path(props)
-        if not os.path.isfile(model_path):
-            self.report({"ERROR"}, f"Model not found: {os.path.basename(model_path)}")
-            return {"CANCELLED"}
+        # model_path = get_model_path(props)
+        # if not os.path.isfile(model_path):
+        #     self.report({"ERROR"}, f"Model not found: {os.path.basename(model_path)}")
+        #     return {"CANCELLED"}
 
-        if mat is None:
-            self.report({"ERROR"}, "No active material — create one first")
-            return {"CANCELLED"}
+        # if mat is None:
+        #     self.report({"ERROR"}, "No active material — create one first")
+        #     return {"CANCELLED"}
 
         # ── Inference ───────────────────────────────────────
         self.set_status(context, "Running inference...")
         self.report({"INFO"}, f"Running inference ({props.precision})...")
 
         try:
-            inferencer = GGUFInference(
-                model_path=get_model_path(props),
-                mmproj_path=os.path.join(props.model_dir, "mmproj_Qwen3_5_0_8B_UT_TexGen_F16.gguf"),
-                n_ctx = 1024,
-                max_tokens = 512,
-                temperature = 0.3,
-                top_p = 0.95
-            )
+            model_path = get_model_path(props)
+            mmproj_path = os.path.join(props.model_dir, "mmproj_Qwen3_5_0_8B_UT_TexGen_F16.gguf")
+            if os.path.isfile(model_path) and os.path.isfile(mmproj_path):
+                inferencer = GGUFInference(
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    n_ctx = 1024,
+                    max_tokens = 512,
+                    temperature = 0.3,
+                    top_p = 0.95
+                )
+            else:
+                inferencer = GGUFInference(
+                    model_repo="YuvrajB13/Qwen-3.5-0.8B-TexGen-GGUF",
+                    model_file=PRECISION_FILENAMES[props.precision].format(model_name=props.model_name),
+                    mmproj_file="mmproj_Qwen3_5_0_8B_UT_TexGen_F16.gguf",
+                    n_ctx = 1024,
+                    max_tokens = 512,
+                    temperature = 0.3,
+                    top_p = 0.95
+                )
             dsl = inferencer.infer(image_path=props.image_path)
         except Exception as e:
             self.set_status(context, f"Inference error: {e}", ok=False)
@@ -208,53 +239,6 @@ class SHADERGENV_OT_Generate(Operator):
         self.report({"INFO"}, "Shader generated successfully")
         return {"FINISHED"}
 
-
-#class SHADERGENV_OT_ReApply(Operator):
-#    bl_idname      = "shadergenv.reapply"
-#    bl_label       = "Re-apply"
-#    bl_description = "Re-apply the last DSL to the active material"
-
-#    def execute(self, context):
-#        props = context.scene.shadergenv_props
-#        obj   = context.object
-#        mat   = obj.active_material if obj else None
-
-#        if not props.last_dsl:
-#            self.report({"WARNING"}, "No previous DSL to re-apply")
-#            return {"CANCELLED"}
-#        if mat is None:
-#            self.report({"ERROR"}, "No active material")
-#            return {"CANCELLED"}
-#        if not MODULES_LOADED:
-#            self.report({"ERROR"}, f"Modules not loaded: {MODULES_ERROR}")
-#            return {"CANCELLED"}
-
-#        try:
-#            shader = TextShader(material=mat)
-#            shader.convert(props.last_dsl)
-#        except Exception as e:
-#            self.report({"ERROR"}, f"Re-apply failed: {e}")
-#            return {"CANCELLED"}
-
-#        self.report({"INFO"}, "Re-applied successfully")
-#        return {"FINISHED"}
-
-
-#class SHADERGENV_OT_CopyDSL(Operator):
-#    bl_idname      = "shadergenv.copy_dsl"
-#    bl_label       = "Copy DSL"
-#    bl_description = "Copy the last DSL output to clipboard"
-
-#    def execute(self, context):
-#        props = context.scene.shadergenv_props
-#        if not props.last_dsl:
-#            self.report({"WARNING"}, "No DSL available")
-#            return {"CANCELLED"}
-#        context.window_manager.clipboard = props.last_dsl
-#        self.report({"INFO"}, "DSL copied to clipboard")
-#        return {"FINISHED"}
-
-
 # ── Panel ─────────────────────────────────────────────────────────────────────
 
 class SHADERGENV_PT_Panel(Panel):
@@ -275,20 +259,19 @@ class SHADERGENV_PT_Panel(Panel):
             box = layout.box()
             box.alert = True
             box.label(text="Could not import modules:", icon="ERROR")
-            box.label(text=MODULES_ERROR[:60])
             box.label(text="Update SHADERGENV_SRC_PATH in addon")
             layout.separator()
 
         # ── Material ────────────────────────────────────────
-        box = layout.box()
-        box.label(text="Material", icon="MATERIAL")
-        if mat:
-            box.label(text=f"  {mat.name}", icon="CHECKMARK")
-        else:
-            box.label(text="No material assigned", icon="ERROR")
-            box.operator("shadergenv.new_material", icon="ADD")
+        # box = layout.box()
+        # box.label(text="Material", icon="MATERIAL")
+        # if mat:
+        #     box.label(text=f"  {mat.name}", icon="CHECKMARK")
+        # else:
+        #     box.label(text="No material assigned", icon="ERROR")
+        #     box.operator("shadergenv.new_material", icon="ADD")
 
-        layout.separator()
+        # layout.separator()
 
         # ── Image ───────────────────────────────────────────
         box = layout.box()
@@ -300,7 +283,7 @@ class SHADERGENV_PT_Panel(Panel):
         # ── Model ───────────────────────────────────────────
         box = layout.box()
         box.label(text="Model", icon="NETWORK_DRIVE")
-        box.prop(props, "model_dir",  text="Folder")
+        box.prop(props, "model_dir",  text="Folder - if installed model manually")
         box.prop(props, "model_name", text="Name")
 
         # Precision toggle buttons
@@ -371,12 +354,16 @@ CLASSES = [
 
 
 def register():
+    bpy.utils.register_class(ShaderGenPreferences)
+    bpy.utils.register_class(SHADERGENV_OT_reload_modules)
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.shadergenv_props = PointerProperty(type=ShaderGenProperties)
 
 
 def unregister():
+    bpy.utils.unregister_class(ShaderGenPreferences)
+    bpy.utils.unregister_class(SHADERGENV_OT_reload_modules)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.shadergenv_props
