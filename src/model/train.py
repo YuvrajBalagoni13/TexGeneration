@@ -203,8 +203,8 @@ def main(
 
     # -- Dataset Loading ------------------------- #
 
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=config['max_output_tokens'], skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=True)
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=config['max_output_tokens'], skip_over_length=True, sample_json_path="/content/drive/MyDrive/ShaderDataset/dataset_samples.json", train=False)
+    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=config['max_output_tokens'], skip_over_length=True)
+    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=config['max_output_tokens'], skip_over_length=True)
 
     collate_fn = partial(shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
@@ -225,16 +225,16 @@ def main(
                     model_params.append(params)
 
         model_optimizer = torch.optim.AdamW([
-            {"params": embedding_params, "lr": float(config['lr_embeds'])},
-            {"params": model_params, "lr": float(config['lr'])}
+            {"params": model_params, "lr": float(config['lr'])},
+            {"params": embedding_params, "lr": float(config['lr_embeds'])}
         ],
         fused = True
         )
     else:
         trainable_params = [p for p in model.parameters() if p.requires_grad]
-        model_optimizer = torch.optim.Adam(trainable_params, lr=config['lr'], fused=True)
+        model_optimizer = torch.optim.AdamW(trainable_params, lr=float(config['lr']), fused=True)
     
-    total_steps = 2500 
+    total_steps = 3000 
     warmup_steps = config['warmup_steps']
     scheduler = get_cosine_schedule_with_warmup(
         optimizer=model_optimizer,
@@ -245,7 +245,7 @@ def main(
     start_epoch = 0
     start_batch_idx = -1
     if load_ckpt_dir and load_state_dir:
-        model, processor, model_optimizer, scheduler, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir)
+        model, processor, model_optimizer, scheduler, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir, new_tokens=config['add_new_tokens'])
 
     total_epochs = config['epochs']
     ACCUMULATION_INTERVAL = config['gradient_accumulation']
@@ -296,7 +296,7 @@ def main(
                 log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[1])
 
             if batch_idx % 250 == 0 and batch_idx != 0:
-                save_checkpoint(epoch, batch_idx, run_name, model, processor, model_optimizer, scheduler, True)
+                save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, scheduler, True, new_tokens=config['add_new_tokens'])
 
             # -- Evaluation ------------------------ #
             if batch_idx % 2500 == 0 and batch_idx != 0:
@@ -327,7 +327,7 @@ def main(
                 
         loss = loss / len(training_dataloader)
         print(f"total loss - {loss} after epochs - {total_epochs}")
-        save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True)
+        save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True, new_tokens=config['add_new_tokens'])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

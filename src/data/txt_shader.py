@@ -3,7 +3,7 @@ import bpy
 import json 
 import ast
 from collections import defaultdict
-from tqdm.auto import tqdm
+# from tqdm.auto import tqdm
 from pathlib import Path
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -212,7 +212,7 @@ if __name__ == "__main__":
     unique_error_logs = defaultdict(list)
     dataset_path = Path("Dataset/infinigen")
     txt_files = list(dataset_path.rglob("*.txt"))
-    for files in tqdm(txt_files):
+    for files in (txt_files):
         try:
             txt_shader = TextShader()
 

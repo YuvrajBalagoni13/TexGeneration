@@ -116,9 +116,10 @@ conda activate TexGen
     | `filtered_val_data_len` | 16k samples |
     | `rslora` | True |
     | `quantize` | False |
+
     Also refer [TRAIN.md](docs/TRAIN.md) for more details regarding them.
 
-    training script - [train script](src/model/train.py)
+    **training script** - [train script](src/model/train.py)
     ```bash
     python -m src.model.train \
     --run_name name_of_run_to_log_in_wandb \

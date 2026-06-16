@@ -28,7 +28,7 @@ def log_metrics(
         })
         
 
-def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, scheduler, log_wandb):
+def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, scheduler, log_wandb, new_tokens):
     print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
     checkpoint_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}"
     resume_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}_state"
@@ -36,14 +36,15 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, sch
     model.save_pretrained(checkpoint_directory, save_embedding_layers=False)
     processor.save_pretrained(checkpoint_directory)
     
-    torch.save(
-        model.get_input_embeddings().new_embeddings.state_dict(),
-        os.path.join(checkpoint_directory, "new_embeddings.pth")
-    )
-    torch.save(
-        model.get_output_embeddings().new_lm_head.state_dict(),
-        os.path.join(checkpoint_directory, "new_lm_head.pth")
-    )
+    if new_tokens:
+        torch.save(
+            model.get_input_embeddings().new_embeddings.state_dict(),
+            os.path.join(checkpoint_directory, "new_embeddings.pth")
+        )
+        torch.save(
+            model.get_output_embeddings().new_lm_head.state_dict(),
+            os.path.join(checkpoint_directory, "new_lm_head.pth")
+        )
     os.makedirs(resume_directory, exist_ok=True)
 
     torch.save(optimizer.state_dict(), os.path.join(resume_directory, "optimizer.pth"))
@@ -73,18 +74,19 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, sch
         wandb.log_artifact(artifact)
     print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
-def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory):
+def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory, new_tokens):
     print(f"------ Loading checkpoint from {checkpoint_directory} ------")
     
     base_model.load_adapter(checkpoint_directory, adapter_name='default')
     processor = AutoProcessor.from_pretrained(checkpoint_directory)
     
-    base_model.get_input_embeddings().new_embeddings.load_state_dict(
-        torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
-    )
-    base_model.get_output_embeddings().new_lm_head.load_state_dict(
-        torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
-    )
+    if new_tokens:
+        base_model.get_input_embeddings().new_embeddings.load_state_dict(
+            torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
+        )
+        base_model.get_output_embeddings().new_lm_head.load_state_dict(
+            torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
+        )
     optimizer.load_state_dict(
         torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
         map_location='cuda')  

@@ -3,7 +3,7 @@ from pathlib import Path
 import bpy
 import argparse
 import gc
-from tqdm.auto import tqdm
+# from tqdm.auto import tqdm
 
 import sys
 import os
@@ -161,7 +161,7 @@ def main(
     result_info = {}
     count = 0
     shader_data_path = Path("ShaderDataset/val")
-    for image, output in tqdm(results.items()):
+    for image, output in (results.items()):
 
         current_info = {}
 
@@ -258,7 +258,7 @@ if __name__ == "__main__":
   --background \
   --python src/model/renderer.py \
   -- \
-  --output_json_path result_inference_json/inference_outputs/temp_0_3_top_p_0_95.json \
-  --save_json_path result_inference_json/results/results_info_temp_0_3_top_p_0_95.json \
-  --render_path RenderedOutputs/temp_0_3_top_p_0_95
+  --output_json_path results_lora_only.json \
+  --save_json_path results_lora_only_RESULTS.json \
+  --render_path RenderedOutputs/lora_only
 """
