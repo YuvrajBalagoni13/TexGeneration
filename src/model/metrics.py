@@ -34,7 +34,6 @@ class LPIPS:
             score = torch.exp(-score)
         return score.item()
 
-class STYLE
 class CLIP:
     def __init__(
             self,

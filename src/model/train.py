@@ -62,22 +62,9 @@ def shader_collate_fn(batch, pad_token_id = 0):
 
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
-        # quantize = False,
-        # mean_subwords = True,
-        # epochs = 5,
-        # batch_size = 2,
-        # lr = 1e-5,
-        # lora = True,
-        # lora_r = 32,
-        # lora_alpha = 64,
-        # gradient_accumulation = 8,
         config_yaml = "",
         load_ckpt_dir = "",
-        load_state_dir = "",
-        # add_new_tokens = False,
-        # tokens_json_path = "",
-        # seed = 42
-
+        load_state_dir = ""
 ) -> None:
     with open(config_yaml, "r") as f:
         config = yaml.safe_load(f)
@@ -356,20 +343,8 @@ if __name__ == "__main__":
     main(
         run_name = args.run_name,
         config_yaml = args.config,
-        # quantize = args.quantize,
-        # mean_subwords = args.mean_subwords,
-        # epochs = args.epochs,
-        # batch_size = args.batch_size,
-        # lr = args.lr,
-        # lora = args.lora,
-        # lora_r = args.lora_r,
-        # lora_alpha = args.lora_alpha,
-        # gradient_accumulation = args.gradient_accumulation,
         load_ckpt_dir = args.load_ckpt_dir,
         load_state_dir = args.load_state_dir,
-        # add_new_tokens = args.add_new_tokens,
-        # tokens_json_path = args.tokens_json_path,
-        # seed = args.seed
     )
 
 """
