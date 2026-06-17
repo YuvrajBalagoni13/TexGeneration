@@ -68,6 +68,13 @@ class Inference:
 
             self.model.resize_token_embeddings(len(self.processor.tokenizer), pad_to_multiple_of=None)
 
+            if self.model.get_input_embeddings().weight.data_ptr() == self.model.get_output_embeddings().weight.data_ptr():
+                print("Weights are tied, untying ...")
+                self.model.lm_head.weight = torch.nn.Parameter(
+                    self.model.get_output_embeddings().weight.clone()
+                )
+            if self.model.get_input_embeddings().weight.data_ptr() != self.model.get_output_embeddings().weight.data_ptr():
+                print("Weights are untied now!")
             n = new_embeddings.shape[0]
             self.model.get_input_embeddings().weight.data[-n:]  = new_embeddings.to(self.precision_type)
             self.model.get_output_embeddings().weight.data[-n:] = new_lm_head.to(self.precision_type)

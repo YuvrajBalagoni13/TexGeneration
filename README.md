@@ -2,6 +2,8 @@
 
 TexGen is a inverse procedural material model that takes a texture image as input & generates a Blender procedural material graphs for that specific image for highly customizable, editable material workflows.
 
+![alt text](docs/imgs/main_img_dark.png)
+
 # Overview 
 Existing work on material generation focus on synthesizing image based texture maps which are baked & static. TexGen tries to generate the procedural shader graph for the given image which are editable, giving more control in the overall workflow.
 
@@ -10,6 +12,14 @@ Input Image -> fine-tuned VLM -> DSL based shader -> addon creates the shader gr
 ```
 
 # Results / Examples
+
+|input image | Output render |
+|---|---|
+|![alt text](docs/examples/shader_001.jpg)|![alt text](docs/examples/output_001.jpg)|
+|![alt text](docs/examples/shader_003.jpg)|![alt text](docs/examples/output_003.jpg)|
+|![alt text](docs/examples/shader_004.jpg)|![alt text](docs/examples/output_004.jpg)|
+|![alt text](docs/examples/shader_006.jpg)|![alt text](docs/examples/output_006.jpg)|
+|![alt text](docs/examples/shader_002.jpg)|![alt text](docs/examples/output_002.jpg)|
 
 # Usage 
 ### Installing Addon
@@ -38,22 +48,24 @@ add model path if installed the model manually from huggingface or else the addo
 # Key Highlight of project -
 - **Inverse Procedural Modelling** : Given an image the model will generate a shader graph corresponding to that image.
 - **Dataset** : Converted VLMaterial dataset (target was a python script for the material) into a Domain specific language for shader graph. Why & How in this doc [DATA.md](docs/DATA.md).
-- **Custom tokens** : added new additional domain specific tokens to the models tokenizer vocabulary for efficient shader representation. In details at [DATA.md](docs/DATA.md).
-- **Model** : did lora fine-tuning for Qwen3.5-0.8B model, also trained the additional embeddings for the new added tokens. Also untied the weights for the new embeddings & lm head as untying helped model performed & learned better than keeping them same. More info here [TRAIN.md](docs/TRAIN.md).
+- **Model** : did lora fine-tuning for Qwen3.5-0.8B model More info here [TRAIN.md](docs/TRAIN.md).
+- **Experimentation - Custom tokens** : added new additional domain specific tokens to the models tokenizer vocabulary for efficient shader representation. In details at [DATA.md](docs/DATA.md).Also trained the additional embeddings for the new added tokens. Also untied the weights for the new embeddings & lm head as untying helped model performed & learned better than keeping them same.
 - **Quantization** : Quantized the model into multiple precision (Q8_0, Q5_K_M, Q4_K_M) using llama.cpp in gguf format. Available at huggingface - [huggingface_link](https://huggingface.co/YuvrajB13/Qwen-3.5-0.8B-TexGen-GGUF/tree/main).
 - **Blender Addon** : Created a blender addon to use the model.
 
 # Metrics
 
-|Model Precision|LPIPS|CLIP|$e^{-lpips}$|
-|---|---|---|---|
-|F16|   |   |   |
-|Q8_0|   |   |   |
-|Q5_K_M|   |   |   |
-|Q4_K_M|   |   |   |
+During training, we do evaluation after every 2500 iterations because running an entire epoch takes a long time & we need to know how our model is performing. Although having smaller training & eval loss tells us the model is learning but it doesn't tell us about the quality of our output.
+Therefore we have 2 metrics (between rendered image from generated output & input image) -
+1. CLIP Similarity Score - For global context
+2. LPIPS Score - For finer details (I did this $e^{-lpips}$).
 
-Here all the metrics are scaled by $(1 - error\%)$.
+|Model|CLIP|LPIPS|$e^{LPIPS}$|no of errors|
+|---|---|---|---|---|
+|`LoRA Only`|0.80|0.70|0.49|16|
+|`New tokens + LoRA`|0.82|0.71|0.48|6|
 
+these are the scores which I got for specific models but as we look at samples themselves then LoRA only model performs better where as for shader language generation LoRA + additional tokens model performed better with minimal issues / errors. for more comparison refer this ['comparison'](docs/COMPARISON.md)
 
 # Project Structure
 ```
