@@ -205,7 +205,7 @@ class ConvertCodeToDSL:
                     path = self.get_full_path(target)
                     path_list = path.split(".")
                     
-                    if path:  # Only process if we got a valid path
+                    if path:  
                         val = ast.literal_eval(node.value)
 
                     if path_list[-1] == "default_value":
@@ -282,8 +282,7 @@ class ConvertCodeToDSL:
         if text_path:
             self.dsl_shader.save_txt(text_path)
 
-        # Reset for next file but keep material
+        
         self.dsl_shader.reset()
-        self.dsl_shader.cleanup_material()  # Clear nodes but keep material
-
+        self.dsl_shader.cleanup_material()  
         return text
