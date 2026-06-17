@@ -2,12 +2,12 @@
 So the original dataset had about 500k+ samples & was made using blender 3.6 version.
 It was using Python script as the target for shader materials.
 The main issue with the dataset were -
-- It had unwanted token usage for a lot of repeated words - avg 909.4 tokens per sample
+1. It had unwanted token usage for a lot of repeated words - avg 909.4 tokens per sample
 	- example - ShaderNode{node_name} every node has ShaderNode as it's prefix which just eat up the tokens while generation.
-	- .default_value, nodes.new, links.new, also first three lines were sample for every samples.
+	- .default_value, nodes.new, links.new, also first three lines were same for every samples.
 	- this scales really badly with increased complexity of the shader graph.
-- The way they assigned properties - so the python code assigned the properties & links with the help of indices to inputs.
-	- What is the issue here? - well first the model never knows what is the representation of that specific indices, because it would be better to know what is the description of the specific property like scale, smoothness, color, etc, which adds more meaning in understanding the property.
+2. The way they assigned properties - so the python code assigned the properties & links with the help of indices to inputs.
+	- What is the issue here? - well first the model doesn't knows what is the representation of that specific indices which it has to learn & it would be better to know what is the description of the specific property like scale, smoothness, color, etc, which adds more meaning in understanding the property.
 	- Another issue with this is the version changing - if we trained the model on the python scripts generation,  it becomes stuck at that specific blender version only (3.6) because in each updates indices can change a lot (if any new property is added or discarded or it just get's reshuffled). So we would have to curate dataset for all node's & their changed properties & retrain the model again to reassign the learned knowledge of specific index to another value, which will need a lot of training & is highly inefficient.
 
 ### Example shader -
@@ -57,7 +57,7 @@ second line for properties - P|<br>
 last line for links - L|
 #### Nodes-
 At nodes line we assign a node to a variable like -<br> **material_output:OutputMaterial**<br>
-where OutputMaterial is the blenders naming convention & material_output is just a variable which has contents of the OutputMaterial node. (blender has it as ShaderNodeOutputMaterial)
+where OutputMaterial is the blenders naming convention for nodes with ShaderNode as prefix (which i removed) & material_output is just a variable which has contents of the OutputMaterial node. (blender has it as ShaderNodeOutputMaterial)
 
 #### Properties-
 At properties line we assign properties based on their path to the property like this -<br>
@@ -83,7 +83,7 @@ means ,
 - **.Surface** : is the input socket of material_output<br>
 
 So this is the basic structure of my attempt at creating a better representation of shader graph generation.<br>
-Can refer to script - src/data/txt_shader.py for the code of this where I convert this DSL into actual material in blender. (Yet to implement the inverse)<br>
+Can refer to script - [src/data/txt_shader.py](../src/data/txt_shader.py) for the code of this where I convert this DSL into actual material in blender. (Yet to implement the inverse)<br>
 
 Now my implementation of shader graph representation (DSL) uses less token consumption as compared to the original python based representation by 36.3%.
 
