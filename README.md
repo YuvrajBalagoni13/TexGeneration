@@ -63,7 +63,7 @@ Therefore we have 2 metrics (between rendered image from generated output & inpu
 |Model|CLIP|LPIPS|$e^{LPIPS}$|no of errors|
 |---|---|---|---|---|
 |`LoRA Only`|0.80|0.70|0.49|16|
-|`New tokens + LoRA`|0.82|0.71|0.48|6|
+|`New tokens + LoRA`|0.82|0.72|0.48|0|
 
 these are the scores which I got for specific models but as we look at samples themselves then LoRA only model performs better where as for shader language generation LoRA + additional tokens model performed better with minimal issues / errors. for more comparison refer this ['comparison'](docs/COMPARISON.md)
 

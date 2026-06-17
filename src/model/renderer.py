@@ -258,7 +258,7 @@ if __name__ == "__main__":
   --background \
   --python src/model/renderer.py \
   -- \
-  --output_json_path results_lora_only_v02_temp_0_1.json \
-  --save_json_path results_lora_only_v02_temp_0_1_RESULTS.json \
-  --render_path RenderedOutputs/lora_only_v02
+  --output_json_path results_new_tokens.json \
+  --save_json_path results_new_tokens.json_RESULTS.json \
+  --render_path RenderedOutputs/new_tokens
 """

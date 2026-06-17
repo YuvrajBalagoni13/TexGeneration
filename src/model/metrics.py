@@ -10,7 +10,6 @@ import torchvision.transforms as T
 import clip
 
 
-
 def load_image_tensor(path: str = "") -> torch.Tensor:
     try:
         img = Image.open(path).convert("RGB").resize((224, 224))
@@ -35,6 +34,7 @@ class LPIPS:
             score = torch.exp(-score)
         return score.item()
 
+class STYLE
 class CLIP:
     def __init__(
             self,
@@ -68,7 +68,7 @@ def main(eval_result_path = "results_info_temp_0_3_top_p_0_95.json"):
     # device = 'cuda' if torch.cuda.is_available() else 'cpu'
     device = 'cpu'
     
-    lpips_scorer = LPIPS(device=device, exp=False)
+    lpips_scorer = LPIPS(device=device, exp=True)
     clip_scorer = CLIP(model='ViT-B/32', device=device)
 
     print("----- Scoring -----")
@@ -110,7 +110,7 @@ def main(eval_result_path = "results_info_temp_0_3_top_p_0_95.json"):
         'avg_clip_score' : avg_clip_score,
         'no_of_errors' : no_of_errors,
         'performance_model' : {
-            'lpips_score' : avg_lpips_score * (1 + (no_of_errors / len(results))),
+            'lpips_score' : avg_lpips_score * (1 - (no_of_errors / len(results))),
             'clip_score' : avg_clip_score * (1 - (no_of_errors / len(results)))
         }
     }
@@ -118,7 +118,7 @@ def main(eval_result_path = "results_info_temp_0_3_top_p_0_95.json"):
     print(f"avg lpips score : {avg_lpips_score}")
     print(f"avg clip score : {avg_clip_score}")
     print(f"no of errors : {no_of_errors}")
-    print(f"Overall performance lpips score : {avg_lpips_score * (1 + (no_of_errors / len(results)))}")
+    print(f"Overall performance lpips score : {avg_lpips_score * (1 - (no_of_errors / len(results)))}")
     print(f"Overall performance clip score : {avg_clip_score * (1 - (no_of_errors / len(results)))}")
     
     with open(eval_result_path, "w") as f:
@@ -136,5 +136,5 @@ if __name__ == "__main__":
 
 """
 python -m src.model.metrics \
---result_json_path result_inference_json/results/results_untied_main_2.json
+--result_json_path results_new_tokens_RESULTS.json
 """
