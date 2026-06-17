@@ -1,8 +1,7 @@
 # VLMaterial Dataset issues -
-So the dataset had about 500k+ samples & was made using blender 3.6 version.
-It is an extensive dataset which was curated from free online sources & also created textures with the help of LLMs.
+So the original dataset had about 500k+ samples & was made using blender 3.6 version.
+It was using Python script as the target for shader materials.
 The main issue with the dataset were -
-- It was using Python script as the target for shader materials.
 - It had unwanted token usage for a lot of repeated words - avg 909.4 tokens per sample
 	- example - ShaderNode{node_name} every node has ShaderNode as it's prefix which just eat up the tokens while generation.
 	- .default_value, nodes.new, links.new, also first three lines were sample for every samples.
