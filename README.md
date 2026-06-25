@@ -122,12 +122,6 @@ conda activate TexGen
     | `warmup_steps` | 25 |
     | `add_new_tokens` | True |
     | `mean_subwords` | True |
-    | `max_seq_length` | 800 |
-    | `max_output_tokens` | 450 |
-    | `filtered_train_data_len` | 117k samples |
-    | `filtered_val_data_len` | 16k samples |
-    | `rslora` | True |
-    | `quantize` | False |
 
     Also refer [TRAIN.md](docs/TRAIN.md) for more details regarding them.
 
@@ -205,3 +199,4 @@ Now this issue comes from the original dataset itself. With better model & full 
 # Future Work & Ideas
 1. Generate a better quality dataset.
 2. Further train the model with Reinforcement Learning to align the output better with the input with similarity metrics as reward functions. Also our shader script gives specific errors where the model failed so we can use these errors to further structure the rewards to be token specific feedback.
+3. Train the model on textual descriptions of the textures so that we can generate shader graphs with just text prompts too.

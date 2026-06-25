@@ -60,6 +60,97 @@ def shader_collate_fn(batch, pad_token_id = 0):
     
     return result
 
+def new_tokens(
+        model,
+        token_json_path, 
+        processor, 
+        mean_subwords, 
+        untie, 
+        trainable,
+        precision_type,
+        device
+    ):
+    with open(token_json_path, "r") as f:
+        tokens_dict = json.load(f)
+
+    old_vocab_size = len(processor.tokenizer)
+
+    new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+            
+    if mean_subwords:
+        subwords_id_list = []
+        for token in new_tokens:
+            subwords = processor.tokenizer.tokenize(token)
+            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+            subwords_id_list.append(subwords_id)
+        
+    processor.tokenizer.add_tokens(new_tokens)
+    # processor.tokenizer.add_special_tokens({
+    #     "additional_special_tokens" : tokens_dict["special_tokens"]
+    # })
+    # untying the weights
+    if untie:
+        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+          print("Weights are tied ...")
+          model.lm_head.weight = nn.Parameter(
+              model.get_output_embeddings().weight.clone()
+          )
+          model.lm_head.weight.requires_grad_(False)
+
+    input_embeddings = model.get_input_embeddings()
+    output_lm_head = model.get_output_embeddings()
+
+    new_embedding_layer = NewTokenEmbeddings(
+        old_embeddings = input_embeddings,
+        old_vocab_size = old_vocab_size,
+        embed_dim = 1024,
+        tokenizer = processor.tokenizer,
+        mean_subwords = mean_subwords,
+        subwords_id_list = subwords_id_list,
+        new_tokens = new_tokens
+    )
+    new_lm_head = NewTokenOutput(
+        old_lm_head = output_lm_head,
+        embed_dim = 1024,
+        old_vocab_size = old_vocab_size,
+        tokenizer = processor.tokenizer,
+        mean_subwords = mean_subwords,
+        subwords_id_list = subwords_id_list,
+        new_tokens = new_tokens
+    )
+
+    if not untie:
+        new_lm_head.new_lm_head.weight = new_embedding_layer.new_embeddings.weight
+
+    new_vocab_size = len(processor.tokenizer)
+    model.config.vocab_size = new_vocab_size
+    model.config.text_config.vocab_size = new_vocab_size
+    setattr(model.config, "vocab_size", new_vocab_size)
+
+    model.set_input_embeddings(new_embedding_layer)
+    model.set_output_embeddings(new_lm_head)
+
+    if not untie and model.get_input_embeddings().new_embeddings.weight.data_ptr() == model.get_output_embeddings().new_lm_head.weight.data_ptr():
+        print(f"----- Successfully tied new embeddings & new lm head -----")
+
+    new_embedding_layer.to(precision_type).to(device)
+    new_lm_head.to(precision_type).to(device)
+
+    # for saving & loading checkpoints
+    config_class = model.config.__class__
+    if not isinstance(getattr(config_class, "vocab_size", None), property):
+        config_class.vocab_size = property(
+            lambda self: self.text_config.vocab_size
+        )
+    
+    model.get_input_embeddings().new_embeddings.requires_grad_(trainable)
+    model.get_output_embeddings().new_lm_head.requires_grad_(trainable)
+
+    model.enable_input_require_grads()
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    print("------- Tokens Trainable parameters enabled & checkpointed -------")
+    return model
+
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
         config_yaml = "",
@@ -107,82 +198,16 @@ def main(
     # -- Get Input Embeddings & LM Head --------------------- #
 
     if config['add_new_tokens']:
-        with open(config['tokens_json_path'], "r") as f:
-            tokens_dict = json.load(f)
-
-        old_vocab_size = len(processor.tokenizer)
-
-        new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-        subwords_id_list = []
-        for token in new_tokens:
-            subwords = processor.tokenizer.tokenize(token)
-            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
-            subwords_id_list.append(subwords_id)
-        
-        processor.tokenizer.add_tokens(new_tokens)
-        # processor.tokenizer.add_special_tokens({
-        #     "additional_special_tokens" : tokens_dict["special_tokens"]
-        # })
-
-        # untying the weights
-        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
-          print("Weights are tied ...")
-          model.lm_head.weight = nn.Parameter(
-              model.get_output_embeddings().weight.clone()
-          )
-          model.lm_head.weight.requires_grad_(False)
-
-        input_embeddings = model.get_input_embeddings()
-        output_lm_head = model.get_output_embeddings()
-
-        new_embedding_layer = NewTokenEmbeddings(
-            old_embeddings = input_embeddings,
-            old_vocab_size = old_vocab_size,
-            embed_dim = 1024,
-            tokenizer = processor.tokenizer,
-            mean_subwords = config['mean_subwords'],
-            subwords_id_list = subwords_id_list,
-            new_tokens = new_tokens
-        )
-        new_lm_head = NewTokenOutput(
-            old_lm_head = output_lm_head,
-            embed_dim = 1024,
-            old_vocab_size = old_vocab_size,
-            tokenizer = processor.tokenizer,
-            mean_subwords = config['mean_subwords'],
-            subwords_id_list = subwords_id_list,
-            new_tokens = new_tokens
-        )
-
-        # new_lm_head.new_lm_head.weight = new_embedding_layer.new_embeddings.weight
-
-        new_vocab_size = len(processor.tokenizer)
-        model.config.vocab_size = new_vocab_size
-        model.config.text_config.vocab_size = new_vocab_size
-        setattr(model.config, "vocab_size", new_vocab_size)
-
-        model.set_input_embeddings(new_embedding_layer)
-        model.set_output_embeddings(new_lm_head)
-
-        # if model.get_input_embeddings().new_embeddings.weight.data_ptr() == model.get_output_embeddings().new_lm_head.weight.data_ptr():
-        #     print(f"----- Successfully tied new embeddings & new lm head -----")
-
-        new_embedding_layer.to(precision_type).to(device)
-        new_lm_head.to(precision_type).to(device)
-
-        # for saving & loading checkpoints
-        config_class = model.config.__class__
-        if not isinstance(getattr(config_class, "vocab_size", None), property):
-            config_class.vocab_size = property(
-                lambda self: self.text_config.vocab_size
-            )
-    
-        model.get_input_embeddings().new_embeddings.requires_grad_(True)
-        model.get_output_embeddings().new_lm_head.requires_grad_(True)
-
-        model.enable_input_require_grads()
-        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        print("------- Tokens Trainable parameters enabled & checkpointed -------")
+        model = new_tokens(
+                    model = model,
+                    token_json_path = config['tokens_json_path'], 
+                    processor = processor, 
+                    mean_subwords = config['mean_subwords'], 
+                    untie = config['untie'], 
+                    trainable = config['tokens_trainable'],
+                    precision_type = precision_type,
+                    device = device
+                )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -252,17 +277,10 @@ def main(
             batch = {k : v.to(device)
                     for k, v in current_batch.items()}
             
-            labels = batch.pop("labels")
-
             with autocast('cuda', dtype=precision_type):
                 outputs = model(**batch)
-                logits = outputs.logits
 
-                shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
-                shift_labels = labels[..., 1:].contiguous().view(-1)
-                batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
-                
-                # batch_loss = outputs.loss
+                batch_loss = outputs.loss
                 batch_loss = batch_loss / ACCUMULATION_INTERVAL
 
             batch_loss.backward()
@@ -280,7 +298,7 @@ def main(
             loss += batch_loss.item() * ACCUMULATION_INTERVAL
 
             if batch_idx % 5 == 0:
-                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[1])
+                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[0])
 
             if batch_idx % 250 == 0 and batch_idx != 0:
                 save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, scheduler, True, new_tokens=config['add_new_tokens'])
@@ -296,16 +314,10 @@ def main(
                         batch = {k : v.to(device)
                                 for k, v in eval_batch.items()}
 
-                        labels = batch.pop("labels")
-
                         with autocast('cuda', dtype = precision_type):
                             eval_outputs = model(**batch)
-                            logits = eval_outputs.logits
-
-                            shift_logits = logits[..., :-1, :].contiguous().view(-1, logits.size(-1))
-                            shift_labels = labels[..., 1:].contiguous().view(-1)
-                            eval_batch_loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=-100)
-
+                            eval_batch_loss = eval_outputs.loss
+                            
                         eval_loss += eval_batch_loss.item()
 
                         if eval_idx % 5 == 0:

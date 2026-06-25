@@ -12,8 +12,10 @@ warmup_steps: 25
 seed: 42
 epochs: 5
 add_new_tokens: True
+tokens_trainable: True
 tokens_json_path : "/content/drive/MyDrive/ShaderDataset/addition_tokens.json"
 mean_subwords: True
+untie: True
 max_seq_length: 800
 max_output_tokens: 450
 rslora: True
