@@ -133,5 +133,3 @@ class ShaderDataset(Dataset):
         result["labels"] = labels
 
         return result
-    
-    

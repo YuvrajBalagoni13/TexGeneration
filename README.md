@@ -49,7 +49,7 @@ add model path if installed the model manually from huggingface or else the addo
 - **Inverse Procedural Modelling** : Given an image the model will generate a shader graph corresponding to that image.
 - **Dataset** : Converted VLMaterial dataset (target was a python script for the material) into a Domain specific language for shader graph. Why & How in this doc [DATA.md](docs/DATA.md).
 - **Model** : did lora fine-tuning for Qwen3.5-0.8B model More info here [TRAIN.md](docs/TRAIN.md).
-- **Experimentation - Custom tokens** : added new additional domain specific tokens to the models tokenizer vocabulary for efficient shader representation. In details at [DATA.md](docs/DATA.md).Also trained the additional embeddings for the new added tokens. Also untied the weights for the new embeddings & lm head as untying helped model performed & learned better than keeping them same.
+- **Experimentation - Custom tokens** : added new additional domain specific tokens to the models tokenizer vocabulary for efficient shader representation. In details at [DATA.md](docs/DATA.md).Also trained the additional embeddings for the new added tokens. Also untied the weights for the new embeddings & lm head as untying helped model performed & learned better than keeping them same. But it still took longer time to train & achieve similar result to that of just LoRA training so scrapped it.
 - **Quantization** : Quantized the model into multiple precision (Q8_0, Q5_K_M, Q4_K_M) using llama.cpp in gguf format. Available at huggingface - [huggingface_link](https://huggingface.co/YuvrajB13/Qwen-3.5-0.8B-TexGen-GGUF/tree/main).
 - **Blender Addon** : Created a blender addon to use the model.
 
@@ -58,14 +58,15 @@ add model path if installed the model manually from huggingface or else the addo
 During training, we do evaluation after every 2500 iterations because running an entire epoch takes a long time & we need to know how our model is performing. Although having smaller training & eval loss tells us the model is learning but it doesn't tell us about the quality of our output.
 Therefore we have 2 metrics (between rendered image from generated output & input image) -
 1. CLIP Similarity Score - For global context
-2. LPIPS Score - For finer details (I did this $e^{-lpips}$).
+2. LPIPS Score - For finer details.
 
-|Model|CLIP|LPIPS|$e^{LPIPS}$|no of errors|
-|---|---|---|---|---|
-|`LoRA Only`|0.80|0.70|0.49|16|
-|`New tokens + LoRA`|0.82|0.72|0.48|0|
+|Model|model CE loss|CLIP|LPIPS|no of errors|no of samples trained|
+|---|---|---|---|---|---|---|
+|`LoRA Only`|0.45|0.80|0.70|16|~2k|
+|`New tokens + LoRA`|0.57|0.82|0.72|0|~12k|
 
-these are the scores which I got for specific models but as we look at samples themselves then LoRA only model performs better where as for shader language generation LoRA + additional tokens model performed better with minimal issues / errors. for more comparison refer this ['comparison'](docs/COMPARISON.md)
+As expected, the LoRA-only model learned faster compared to the model with new tokens. It reached a loss of 0.45 after processing roughly 2k samples, then saturated and continued learning slowly afterward. The new-tokens model, on the other hand, plateaued around a CE loss of 0.57 at roughly 12k samples and has remained saturated near that level since taking longer time & resources to adapt.
+As we look at samples themselves then LoRA only model performs better where as for shader language generation LoRA + additional tokens model performed better with minimal issues / errors bacause it is good with the language terminologies but takes way longer to train. for more comparison refer this ['comparison'](docs/COMPARISON.md) (ps - Not yet added).
 
 # Project Structure
 ```
