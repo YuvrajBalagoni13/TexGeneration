@@ -1,9 +1,14 @@
 import os
 import torch
-from peft import PeftModel
-from transformers import AutoProcessor
 import wandb
 
+from peft import PeftModel, get_peft_model
+from transformers import AutoProcessor
+from unsloth import FastVisionModel
+from typing import Optional, Dict, List
+
+def load_optimizer():
+    return
 
 def log_metrics(
         epoch : int = None, 

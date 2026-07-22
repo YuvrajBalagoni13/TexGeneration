@@ -1,7 +1,116 @@
 import torch
 import torch.nn as nn
+import json
+
+def new_tokens(
+        model,
+        token_json_path, 
+        processor, 
+        mean_subwords, 
+        untie, 
+        trainable,
+        precision_type,
+        device
+    ):
+    """
+    Will add new additional tokens to the tokenizer.
+    Args:
+        model: model to get the embeddings
+        token_json_path: Path to json containing additional tokens
+        processor: processor to add tokens
+        mean_subwords: New embeddings will be mean of embeddings which would have been in original tokenizer for that new token
+        untie: If want to untie the input & output embeddings (Not recommended as it will just increase the model size with no benefit)
+        trainable: if we want to make the new embeddings trainable
+        precision_type: precision type of new embeddings
+        device: device 
+    Return:
+        model with new embeddings in it.
+    """
+    with open(token_json_path, "r") as f:
+        tokens_dict = json.load(f)
+
+    old_vocab_size = len(processor.tokenizer)
+
+    new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
+            
+    if mean_subwords:
+        subwords_id_list = []
+        for token in new_tokens:
+            subwords = processor.tokenizer.tokenize(token)
+            subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
+            subwords_id_list.append(subwords_id)
+        
+    processor.tokenizer.add_tokens(new_tokens)
+    # processor.tokenizer.add_special_tokens({
+    #     "additional_special_tokens" : tokens_dict["special_tokens"]
+    # })
+    # untying the weights
+    if untie:
+        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+          print("Weights are tied ...")
+          model.lm_head.weight = nn.Parameter(
+              model.get_output_embeddings().weight.clone()
+          )
+          model.lm_head.weight.requires_grad_(False)
+
+    input_embeddings = model.get_input_embeddings()
+    output_lm_head = model.get_output_embeddings()
+
+    new_embedding_layer = NewTokenEmbeddings(
+        old_embeddings = input_embeddings,
+        old_vocab_size = old_vocab_size,
+        embed_dim = 1024,
+        tokenizer = processor.tokenizer,
+        mean_subwords = mean_subwords,
+        subwords_id_list = subwords_id_list,
+        new_tokens = new_tokens
+    )
+    new_lm_head = NewTokenOutput(
+        old_lm_head = output_lm_head,
+        embed_dim = 1024,
+        old_vocab_size = old_vocab_size,
+        tokenizer = processor.tokenizer,
+        mean_subwords = mean_subwords,
+        subwords_id_list = subwords_id_list,
+        new_tokens = new_tokens
+    )
+
+    if not untie:
+        new_lm_head.new_lm_head.weight = new_embedding_layer.new_embeddings.weight
+
+    new_vocab_size = len(processor.tokenizer)
+    model.config.vocab_size = new_vocab_size
+    model.config.text_config.vocab_size = new_vocab_size
+    setattr(model.config, "vocab_size", new_vocab_size)
+
+    model.set_input_embeddings(new_embedding_layer)
+    model.set_output_embeddings(new_lm_head)
+
+    if not untie and model.get_input_embeddings().new_embeddings.weight.data_ptr() == model.get_output_embeddings().new_lm_head.weight.data_ptr():
+        print(f"----- Successfully tied new embeddings & new lm head -----")
+
+    new_embedding_layer.to(precision_type).to(device)
+    new_lm_head.to(precision_type).to(device)
+
+    # for saving & loading checkpoints
+    config_class = model.config.__class__
+    if not isinstance(getattr(config_class, "vocab_size", None), property):
+        config_class.vocab_size = property(
+            lambda self: self.text_config.vocab_size
+        )
+    
+    model.get_input_embeddings().new_embeddings.requires_grad_(trainable)
+    model.get_output_embeddings().new_lm_head.requires_grad_(trainable)
+
+    model.enable_input_require_grads()
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    print("------- Tokens Trainable parameters enabled & checkpointed -------")
+    return model
 
 class NewTokenEmbeddings(nn.Module):
+    """
+    For processing new input token embeddings separate than original embeddings.
+    """
     def __init__(
             self, 
             old_embeddings : nn.Embedding = None,
@@ -49,6 +158,9 @@ class NewTokenEmbeddings(nn.Module):
         return old_vectors * is_old + new_vectors * (1.0 - is_old)
     
 class NewTokenOutput(nn.Module):
+    """
+    For processing new output token embeddings (if untied) separate than original embeddings.
+    """
     def __init__(
             self, 
             old_lm_head : nn.Linear = None,

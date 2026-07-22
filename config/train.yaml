@@ -1,22 +1,38 @@
+# model 
 model_base: Qwen3.5-0.8B
-run_name: LoRA_token_scheduler_0.1_scale_lr_embed_06
-lr: 5e-5
-lr_embeds: 5e-6
-batch_size: 4
-gradient_accumulation: 4
+precision: torch.float16
+max_seq_length: 800
+max_output_tokens: 450
+quantize: False
+
+# LoRA 
+lora: True
 lora_r: 32
 lora_alpha: 64
 lora_dropout: 0.0
-precision: torch.float16
-warmup_steps: 25
-seed: 42
-epochs: 5
+vision: True  # LoRA on vision layers
+language: True # LoRA on language layers
+attention: True # LoRA on attention modules
+mlp: True # LoRA on mlp modules
+rslora: True
+
+#Additional Tokens
 add_new_tokens: True
 tokens_trainable: True
 tokens_json_path : "/content/drive/MyDrive/ShaderDataset/addition_tokens.json"
 mean_subwords: True
 untie: True
-max_seq_length: 800
-max_output_tokens: 450
-rslora: True
-quantize: False
+
+# Dataset
+skip_over_length: False
+add_space_btw_nums: False
+
+# Training
+run_name: LoRA_token_scheduler_0.1_scale_lr_embed_06
+seed: 42
+lr: 5e-5
+lr_embeds: 5e-6  # If additional tokens added
+batch_size: 4
+gradient_accumulation: 4
+warmup_steps: 25
+epochs: 5

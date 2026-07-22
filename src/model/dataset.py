@@ -2,10 +2,12 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch.nn.utils.rnn import pad_sequence
 from pathlib import Path
 from PIL import Image
 from tqdm.auto import tqdm
 import json
+import re
 
 
 class ShaderDataset(Dataset):
@@ -16,7 +18,8 @@ class ShaderDataset(Dataset):
             max_seq_length : int = 2048,
             skip_over_length : bool = False,
             sample_json_path : str = None,
-            train : bool = True
+            train : bool = True,
+            add_space_btw_nums: bool = False
     ) -> None:
         super().__init__()
         self.samples = []
@@ -24,6 +27,7 @@ class ShaderDataset(Dataset):
         self.processor = tokenizer_and_processor
         self.max_seq_length = max_seq_length
         self.skip_over_length = skip_over_length
+        self.add_space_btw_nums = add_space_btw_nums
 
         skipped = 0
         all_pairs = []
@@ -77,6 +81,7 @@ class ShaderDataset(Dataset):
         image = Image.open(sample["image"]).convert("RGB")
         with open(sample["shader"], "r") as f:
             shader_text = f.read()
+            shader_text = self.space_btw_nums(shader_text) if self.add_space_btw_nums else shader_text
 
         conversation = [
             {
@@ -133,3 +138,43 @@ class ShaderDataset(Dataset):
         result["labels"] = labels
 
         return result
+
+    @staticmethod
+    def space_btw_nums(text: str) -> str:
+        def space_digits(match):
+            num_str = match.group(0)
+            return " ".join(list(num_str))
+        return re.sub(r'-?\d+\.?\d*', space_digits, text)
+    
+    @staticmethod
+    def shader_collate_fn(batch, pad_token_id = 0):
+        """
+        Adds padding to all the values to stack the batches together.
+        """
+        input_ids = pad_sequence([b["input_ids"] for b in batch], batch_first=True, padding_value=pad_token_id)
+        attention_mask = pad_sequence([b["attention_mask"] for b in batch], batch_first=True, padding_value=0)
+        labels = pad_sequence([b["labels"] for b in batch], batch_first=True, padding_value=-100)
+        pixel_values = torch.stack([b["pixel_values"] for b in batch])
+    
+        result = {
+            "input_ids" : input_ids,
+            "attention_mask" : attention_mask,
+            "pixel_values" : pixel_values,
+            "labels" : labels,
+        }
+    
+        if "image_grid_thw" in batch[0]:
+            result["image_grid_thw"] = torch.stack([b["image_grid_thw"] for b in batch])
+
+        if "mm_token_type_ids" in batch[0]:
+            result["mm_token_type_ids"] = pad_sequence([b["mm_token_type_ids"] for b in batch], batch_first=True, padding_value=0)
+        
+        if "spatial_shapes" in batch[0]:
+            result["spatial_shapes"] = torch.stack([b["spatial_shapes"] for b in batch])
+            
+        if "pixel_attention_mask" in batch[0]:
+            result["pixel_attention_mask"] = pad_sequence([b["pixel_attention_mask"] for b in batch], batch_first=True, padding_value=0)
+        return result
+    
+
+
