@@ -1,9 +1,10 @@
 # model 
-model_base: Qwen3.5-0.8B
+model_base: Qwen/Qwen3.5-0.8B
 precision: torch.float16
 max_seq_length: 800
 max_output_tokens: 450
 quantize: False
+add_regression_head: True
 
 # LoRA 
 lora: True
@@ -17,18 +18,18 @@ mlp: True # LoRA on mlp modules
 rslora: True
 
 #Additional Tokens
-add_new_tokens: True
-tokens_trainable: True
+add_new_tokens: False
+tokens_trainable: False
 tokens_json_path : "/content/drive/MyDrive/ShaderDataset/addition_tokens.json"
-mean_subwords: True
-untie: True
+mean_subwords: False
+untie: False
 
 # Dataset
 skip_over_length: False
 add_space_btw_nums: False
 
 # Training
-run_name: LoRA_token_scheduler_0.1_scale_lr_embed_06
+run_name: qwen3.5-0.8B
 seed: 42
 lr: 5e-5
 lr_embeds: 5e-6  # If additional tokens added
@@ -36,3 +37,5 @@ batch_size: 4
 gradient_accumulation: 4
 warmup_steps: 25
 epochs: 5
+mse_lambda: 1.0
+ce_lambda: 1.0

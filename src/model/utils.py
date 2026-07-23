@@ -2,52 +2,62 @@ import os
 import torch
 import wandb
 
-from peft import PeftModel, get_peft_model
 from transformers import AutoProcessor
-from unsloth import FastVisionModel
-from typing import Optional, Dict, List
 
-def load_optimizer():
-    return
+class SymLogNorm:
+    def norm(self, x):
+        return torch.sign(x) * torch.log1p(torch.abs(x))
+    def inv_norm(self, x):
+        return torch.sign(x) * torch.expm1(torch.abs(x))
 
 def log_metrics(
         epoch : int = None, 
         iteration : int = None, 
         loss : float = None, 
+        mse_loss: float = None,
         lr : float = None, 
         train : bool = True):
     if train:
-        print(f"epoch {epoch + 1} | iteration {iteration} | lr - {lr} | train loss - {loss:.2f} ")
+        print(f"epoch {epoch + 1} | iteration {iteration} | lr - {lr} | train loss - {loss:.2f} | mse loss - {mse_loss:.2f}")
         wandb.log({
             "epoch" : epoch,
             "iteration" : iteration,
             "train loss" : loss,
+            "train mse loss": mse_loss,
             "lr" : lr
         })
     else:
-        print(f"epoch {epoch + 1} | eval iteration {iteration} | eval loss - {loss:.2f} ")
+        print(f"epoch {epoch + 1} | eval iteration {iteration} | eval loss - {loss:.2f} | mse loss - {mse_loss:.2f}")
         wandb.log({
             "epoch" : epoch,
             "eval iteration" : iteration,
-            "eval loss" : loss
+            "eval loss" : loss,
+            "eval mse loss": mse_loss
         })
         
 
-def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, scheduler, log_wandb, new_tokens):
+def save_checkpoint(epoch, iteration, run_name, base_model, processor, optimizer, scheduler, log_wandb, new_tokens, regression_model):
     print(f"------ Saving model checkpoint for epoch {epoch + 1} & iteration {iteration} ------")
     checkpoint_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}"
     resume_directory = f"./ckpts_{run_name}_{epoch + 1}_{iteration}/texgen_{run_name}_{epoch + 1}_{iteration}_state"
     os.makedirs(checkpoint_directory, exist_ok=True)
-    model.save_pretrained(checkpoint_directory, save_embedding_layers=False)
+    if not regression_model:
+        base_model.save_pretrained(checkpoint_directory, save_embedding_layers=False)
+    else:
+        base_model.model.save_pretrained(checkpoint_directory, save_embedding_layers=False)
+        torch.save(
+            base_model.regression_head.state_dict(),
+            os.path.join(checkpoint_directory, "regression_head.pth")
+        )
     processor.save_pretrained(checkpoint_directory)
     
     if new_tokens:
         torch.save(
-            model.get_input_embeddings().new_embeddings.state_dict(),
+            base_model.get_input_embeddings().new_embeddings.state_dict(),
             os.path.join(checkpoint_directory, "new_embeddings.pth")
         )
         torch.save(
-            model.get_output_embeddings().new_lm_head.state_dict(),
+            base_model.get_output_embeddings().new_lm_head.state_dict(),
             os.path.join(checkpoint_directory, "new_lm_head.pth")
         )
     os.makedirs(resume_directory, exist_ok=True)
@@ -79,10 +89,14 @@ def save_checkpoint(epoch, iteration, run_name, model, processor, optimizer, sch
         wandb.log_artifact(artifact)
     print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
-def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory, new_tokens):
+def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory, new_tokens, regression_model):
     print(f"------ Loading checkpoint from {checkpoint_directory} ------")
     
-    base_model.load_adapter(checkpoint_directory, adapter_name='default')
+    if not regression_model:
+        base_model.load_adapter(checkpoint_directory, adapter_name='default')
+    else:
+        base_model.model.load_adapter(checkpoint_directory, adapter_name='default')
+        base_model.regression_head.load_state_dict(torch.load(os.path.join(checkpoint_directory, "regression_head.pth")))
     processor = AutoProcessor.from_pretrained(checkpoint_directory)
     
     if new_tokens:
@@ -92,17 +106,20 @@ def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_dire
         base_model.get_output_embeddings().new_lm_head.load_state_dict(
             torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
         )
-    optimizer.load_state_dict(
-        torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
-        map_location='cuda')  
-    )
-    scheduler.load_state_dict(
-        torch.load(os.path.join(optimizer_directory, "scheduler.pth"),
-        map_location='cuda')
-    )
-    state = torch.load(os.path.join(optimizer_directory, "training_state.pth"))
-    epoch = state['epoch']
-    iteration = state['iteration']
+    if optimizer_directory is not None:
+        optimizer.load_state_dict(
+            torch.load(os.path.join(optimizer_directory, "optimizer.pth"),
+            map_location='cuda')  
+        )
+        scheduler.load_state_dict(
+            torch.load(os.path.join(optimizer_directory, "scheduler.pth"),
+            map_location='cuda')
+        )
+        state = torch.load(os.path.join(optimizer_directory, "training_state.pth"))
+        epoch = state['epoch']
+        iteration = state['iteration']
     
-    print(f"------ Resumed from epoch {epoch + 1}, iteration {iteration} ------")
-    return base_model, processor, optimizer, scheduler, epoch, iteration
+        print(f"------ Resumed from epoch {epoch + 1}, iteration {iteration} ------")
+        return base_model, processor, optimizer, scheduler, epoch, iteration
+    else:
+        return base_model, processor, None, None, None, None

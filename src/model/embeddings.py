@@ -26,6 +26,10 @@ def new_tokens(
     Return:
         model with new embeddings in it.
     """
+    model.config.tie_word_embeddings = False
+    if hasattr(model.config, "text_config"):
+        model.config.text_config.tie_word_embeddings = False
+
     with open(token_json_path, "r") as f:
         tokens_dict = json.load(f)
 
@@ -41,17 +45,17 @@ def new_tokens(
             subwords_id_list.append(subwords_id)
         
     processor.tokenizer.add_tokens(new_tokens)
-    # processor.tokenizer.add_special_tokens({
-    #     "additional_special_tokens" : tokens_dict["special_tokens"]
-    # })
+    processor.tokenizer.add_special_tokens({
+        "additional_special_tokens" : tokens_dict["special_tokens"]
+    })
     # untying the weights
-    if untie:
-        if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
-          print("Weights are tied ...")
-          model.lm_head.weight = nn.Parameter(
-              model.get_output_embeddings().weight.clone()
-          )
-          model.lm_head.weight.requires_grad_(False)
+    # if untie:
+    #     if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
+    #       print("Weights are tied ...")
+    #       model.lm_head.weight = nn.Parameter(
+    #           model.get_output_embeddings().weight.clone()
+    #       )
+    #       model.lm_head.weight.requires_grad_(False)
 
     input_embeddings = model.get_input_embeddings()
     output_lm_head = model.get_output_embeddings()
@@ -105,6 +109,13 @@ def new_tokens(
     model.enable_input_require_grads()
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     print("------- Tokens Trainable parameters enabled & checkpointed -------")
+
+    print("after new_tokens:", 
+      model.get_input_embeddings().new_embeddings.weight.data_ptr(),
+      model.get_output_embeddings().new_lm_head.weight.data_ptr())
+    print("after new_tokens old embeddings:", 
+      model.get_input_embeddings().old_embeddings.weight.data_ptr(),
+      model.get_output_embeddings().old_lm_head.weight.data_ptr())
     return model
 
 class NewTokenEmbeddings(nn.Module):

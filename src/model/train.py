@@ -25,7 +25,8 @@ from typing import Optional, List, Dict
 
 from .dataset import ShaderDataset
 from .embeddings import NewTokenEmbeddings, NewTokenOutput, new_tokens
-from .utils import log_metrics, save_checkpoint, load_checkpoint, load_model
+from .utils import log_metrics, save_checkpoint, load_checkpoint
+from .model import load_model, RegressionHead, TexGenModel
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -35,7 +36,6 @@ def seed_everything(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     os.environ["PYTHONHASHSEED"] = str(seed)
-
 
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
@@ -74,6 +74,17 @@ def main(
         precision_type = precision_type,
         device = device
     )
+    if config['add_regression_head']:
+        regression_head = RegressionHead(
+            embed_dim = 768,
+            hidden_dim = 512,
+            dropout = 0.01
+        )
+        model = TexGenModel(
+            model = model,
+            regression_head = regression_head,
+            trigger_token_id = 12
+        )
 
     # Get Input Embeddings & LM Head --------------------- #
 
@@ -95,8 +106,22 @@ def main(
 
     # Dataset Loading ------------------------- #
 
-    training_dataset = ShaderDataset("/content/ShaderDataset/train", processor, max_seq_length=config['max_output_tokens'], skip_over_length=config['skip_over_length'], add_space_btw_nums=config['add_space_btw_nums'])
-    testing_dataset = ShaderDataset("/content/ShaderDataset/val", processor, max_seq_length=config['max_output_tokens'], skip_over_length=config['skip_over_length'], add_space_btw_nums=config['add_space_btw_nums'])
+    training_dataset = ShaderDataset(
+        "/content/ShaderDataset/train", 
+        processor, 
+        max_seq_length=config['max_output_tokens'], 
+        skip_over_length=config['skip_over_length'], 
+        add_space_btw_nums=config['add_space_btw_nums'], 
+        format_for_regression=config['add_regression_head']
+    )
+    testing_dataset = ShaderDataset(
+        "/content/ShaderDataset/val", 
+        processor, 
+        max_seq_length=config['max_output_tokens'], 
+        skip_over_length=config['skip_over_length'], 
+        add_space_btw_nums=config['add_space_btw_nums'], 
+        format_for_regression=config['add_regression_head']
+    )
 
     collate_fn = partial(training_dataset.shader_collate_fn, pad_token_id = processor.tokenizer.pad_token_id)
 
@@ -139,11 +164,12 @@ def main(
 
     # Loading ckpt if given -------------------------------------------------- #
     if load_ckpt_dir and load_state_dir:
-        model, processor, model_optimizer, scheduler, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir, new_tokens=config['add_new_tokens'])
+        model, processor, model_optimizer, scheduler, start_epoch, start_batch_idx = load_checkpoint(model, processor, model_optimizer, scheduler, load_ckpt_dir, load_state_dir, new_tokens=config['add_new_tokens'], regression_model=config['add_regression_head'])
 
     total_epochs = config['epochs']
     ACCUMULATION_INTERVAL = config['gradient_accumulation']
 
+    criterion = nn.MSELoss()
     # Training Loop -------------------------------------------------- #
     wandb.init(project="TexGeneration", name=config['run_name'], config = config)
     for epoch in range(start_epoch, total_epochs):
@@ -157,15 +183,23 @@ def main(
             
             model.train()
             batch = {k : v.to(device)
-                    for k, v in current_batch.items()}
+                    for k, v in current_batch['text'].items()}
+            num_vals = current_batch['nums']
             
+            batch_mse_loss = 0.0
             with autocast('cuda', dtype=precision_type):
-                outputs = model(**batch)
+                if config['add_regression_head']:
+                    outputs, regressio_preds = model(**batch)
+                    batch_mse_loss = criterion(regressio_preds, num_vals)
+                    batch_mse_loss = batch_mse_loss / ACCUMULATION_INTERVAL
+                else:
+                    outputs = model(**batch)
 
                 batch_loss = outputs.loss
                 batch_loss = batch_loss / ACCUMULATION_INTERVAL
 
-            batch_loss.backward()
+            final_loss = config['ce_lambda'] * batch_loss + config['mse_lambda'] * batch_mse_loss
+            final_loss.backward()
 
             if (batch_idx + 1) % ACCUMULATION_INTERVAL == 0:
                 total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = 1.0)
@@ -177,13 +211,13 @@ def main(
                 model_optimizer.zero_grad()
                 
             
-            loss += batch_loss.item() * ACCUMULATION_INTERVAL
+            loss += final_loss.item() * ACCUMULATION_INTERVAL
 
             if batch_idx % 5 == 0:
-                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[0])
+                log_metrics(epoch=epoch, iteration=batch_idx, loss=batch_loss.item() * ACCUMULATION_INTERVAL, mse_loss = batch_mse_loss * ACCUMULATION_INTERVAL, lr = scheduler.get_last_lr()[0])
 
             if batch_idx % 250 == 0 and batch_idx != 0:
-                save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, scheduler, True, new_tokens=config['add_new_tokens'])
+                save_checkpoint(epoch, batch_idx, wandb.run.name, model, processor, model_optimizer, scheduler, True, new_tokens=config['add_new_tokens'], regression_model=config['add_regression_head'])
 
             # -- Evaluation Loop ---------------------------------------------- #
             if batch_idx % 2500 == 0 and batch_idx != 0:
@@ -194,21 +228,26 @@ def main(
                         if eval_idx > 50:
                             break
                         batch = {k : v.to(device)
-                                for k, v in eval_batch.items()}
+                                for k, v in eval_batch['text'].items()}
+                        num_vals = eval_batch['nums']
 
+                        eval_mse_loss = 0.0
                         with autocast('cuda', dtype = precision_type):
+                            if config["add_regression_head"]:
+                                eval_outputs, eval_regression_preds = model(**batch)
+                                eval_mse_loss = criterion(eval_regression_preds, num_vals)
                             eval_outputs = model(**batch)
                             eval_batch_loss = eval_outputs.loss
                             
                         eval_loss += eval_batch_loss.item()
 
                         if eval_idx % 5 == 0:
-                            log_metrics(epoch=epoch, iteration=eval_idx, loss=eval_batch_loss.item(), train=False)
+                            log_metrics(epoch=epoch, iteration=eval_idx, loss=eval_batch_loss.item(), mse_loss = eval_mse_loss, train=False)
 
                 
         loss = loss / len(training_dataloader)
         print(f"total loss - {loss} after epochs - {total_epochs}")
-        save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True, new_tokens=config['add_new_tokens'])
+        save_checkpoint(epoch, 0, wandb.run.name, model, processor, model_optimizer, True, new_tokens=config['add_new_tokens'], regression_model=config['add_regression_head'])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
