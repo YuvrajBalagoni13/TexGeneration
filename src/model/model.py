@@ -48,17 +48,25 @@ def load_model(
     return model, processor
 
 class TexGenModel(nn.Module):
-    def __init__(self, model, regression_head, trigger_token_id):
+    def __init__(self, model, regression_head, trigger_token_id=248077):
         super().__init__()
         self.model = model
         self.regression_head = regression_head
         self.trigger_token_id = trigger_token_id
 
+        last_layer = self.model.base_model.model.model.language_model.layers[-1]
+        last_layer.register_forward_hook(self._capture_hidden)
+
+    def _capture_hidden(self, module, input, output):
+        self._last_hidden_state = output[0] if isinstance(output, tuple) else output
+
     def forward(self, x):
-        outputs = self.model(**x, output_hidden_states=True)
+        model_inputs = {k: v for k, v in x.items() if k != "labels"}
+
+        outputs = self.model(**model_inputs)
         vlm_logits = outputs.logits
 
-        last_hidden_states = outputs.hidden_states[-1] 
+        last_hidden_states = self._last_hidden_state
         num_mask = (x['input_ids'] == self.trigger_token_id)
         valid_hidden_states = last_hidden_states[num_mask]
 
@@ -102,10 +110,7 @@ class RegressionHead(nn.Module):
     def __init__(self, embed_dim: int, hidden_dim: int, dropout: float):
         super().__init__()
         self.linear = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(embed_dim, 1)
         )
 
     def forward(self, x):

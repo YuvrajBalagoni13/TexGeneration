@@ -26,6 +26,7 @@ def new_tokens(
     Return:
         model with new embeddings in it.
     """
+
     model.config.tie_word_embeddings = False
     if hasattr(model.config, "text_config"):
         model.config.text_config.tie_word_embeddings = False
@@ -36,9 +37,9 @@ def new_tokens(
     old_vocab_size = len(processor.tokenizer)
 
     new_tokens = tokens_dict["new_tokens"] + tokens_dict["special_tokens"]
-            
+
+    subwords_id_list = []      
     if mean_subwords:
-        subwords_id_list = []
         for token in new_tokens:
             subwords = processor.tokenizer.tokenize(token)
             subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
@@ -48,6 +49,7 @@ def new_tokens(
     processor.tokenizer.add_special_tokens({
         "additional_special_tokens" : tokens_dict["special_tokens"]
     })
+    print(f"<NUM> tokens id - {processor.tokenizer.convert_tokens_to_ids('<NUM>')}")
     # untying the weights
     # if untie:
     #     if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
@@ -110,10 +112,10 @@ def new_tokens(
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     print("------- Tokens Trainable parameters enabled & checkpointed -------")
 
-    print("after new_tokens:", 
+    print("after new_tokens new embeddings address:", 
       model.get_input_embeddings().new_embeddings.weight.data_ptr(),
       model.get_output_embeddings().new_lm_head.weight.data_ptr())
-    print("after new_tokens old embeddings:", 
+    print("after new_tokens old embeddings address:", 
       model.get_input_embeddings().old_embeddings.weight.data_ptr(),
       model.get_output_embeddings().old_lm_head.weight.data_ptr())
     return model

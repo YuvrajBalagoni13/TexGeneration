@@ -1,5 +1,5 @@
 # model 
-model_base: Qwen/Qwen3.5-0.8B
+model_base: LiquidAI/LFM2.5-VL-450M
 precision: torch.float16
 max_seq_length: 800
 max_output_tokens: 450
@@ -8,8 +8,8 @@ add_regression_head: True
 
 # LoRA 
 lora: True
-lora_r: 32
-lora_alpha: 64
+lora_r: 64
+lora_alpha: 128
 lora_dropout: 0.0
 vision: True  # LoRA on vision layers
 language: True # LoRA on language layers
@@ -18,24 +18,24 @@ mlp: True # LoRA on mlp modules
 rslora: True
 
 #Additional Tokens
-add_new_tokens: False
-tokens_trainable: False
-tokens_json_path : "/content/drive/MyDrive/ShaderDataset/addition_tokens.json"
-mean_subwords: False
-untie: False
+add_new_tokens: True
+tokens_trainable: True
+tokens_json_path : "/content/additional_tokens.json"
+mean_subwords: True
+untie: True
 
 # Dataset
 skip_over_length: False
 add_space_btw_nums: False
 
 # Training
-run_name: qwen3.5-0.8B
+run_name: LFM_450M_model_Regression_Head
 seed: 42
 lr: 5e-5
 lr_embeds: 5e-6  # If additional tokens added
-batch_size: 4
-gradient_accumulation: 4
+batch_size: 8
+gradient_accumulation: 2
 warmup_steps: 25
 epochs: 5
-mse_lambda: 1.0
+mse_lambda: 0.0
 ce_lambda: 1.0

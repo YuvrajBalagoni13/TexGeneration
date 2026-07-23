@@ -53,11 +53,11 @@ def save_checkpoint(epoch, iteration, run_name, base_model, processor, optimizer
     
     if new_tokens:
         torch.save(
-            base_model.get_input_embeddings().new_embeddings.state_dict(),
+            base_model.get_input_embeddings().new_embeddings.state_dict() if not regression_model else base_model.model.get_input_embeddings().new_embeddings.state_dict(),
             os.path.join(checkpoint_directory, "new_embeddings.pth")
         )
         torch.save(
-            base_model.get_output_embeddings().new_lm_head.state_dict(),
+            base_model.get_output_embeddings().new_lm_head.state_dict() if not regression_model else base_model.model.get_output_embeddings().new_lm_head.state_dict(),
             os.path.join(checkpoint_directory, "new_lm_head.pth")
         )
     os.makedirs(resume_directory, exist_ok=True)
@@ -100,12 +100,20 @@ def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_dire
     processor = AutoProcessor.from_pretrained(checkpoint_directory)
     
     if new_tokens:
-        base_model.get_input_embeddings().new_embeddings.load_state_dict(
-            torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
-        )
-        base_model.get_output_embeddings().new_lm_head.load_state_dict(
-            torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
-        )
+        if regression_model:
+            base_model.model.get_input_embeddings().new_embeddings.load_state_dict(
+                torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
+            )
+            base_model.model.get_output_embeddings().new_lm_head.load_state_dict(
+                torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
+            )
+        else:
+            base_model.get_input_embeddings().new_embeddings.load_state_dict(
+                torch.load(os.path.join(checkpoint_directory, "new_embeddings.pth"))
+            )
+            base_model.get_output_embeddings().new_lm_head.load_state_dict(
+                torch.load(os.path.join(checkpoint_directory, "new_lm_head.pth"))
+            )
     if optimizer_directory is not None:
         optimizer.load_state_dict(
             torch.load(os.path.join(optimizer_directory, "optimizer.pth"),

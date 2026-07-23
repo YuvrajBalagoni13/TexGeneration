@@ -182,7 +182,8 @@ class ShaderDataset(Dataset):
                             val = '<NUM>'
                             
                         else:
-                            print(f"Ignored non-numeric parsed val: {parsed_val}")
+                            # print(f"Ignored non-numeric parsed val: {parsed_val}")
+                            pass
                             
                     except (ValueError, SyntaxError):
                         print(f"Ignored raw string val: {val}")
@@ -222,21 +223,22 @@ class ShaderDataset(Dataset):
             "labels" : labels,
         }
     
-        if "image_grid_thw" in batch[0]:
+        if "image_grid_thw" in batch[0]['text']:
             result["image_grid_thw"] = torch.stack([b["text"]["image_grid_thw"] for b in batch])
 
-        if "mm_token_type_ids" in batch[0]:
+        if "mm_token_type_ids" in batch[0]['text']:
             result["mm_token_type_ids"] = pad_sequence([b["text"]["mm_token_type_ids"] for b in batch], batch_first=True, padding_value=0)
         
-        if "spatial_shapes" in batch[0]:
+        if "spatial_shapes" in batch[0]['text']:
             result["spatial_shapes"] = torch.stack([b["text"]["spatial_shapes"] for b in batch])
             
-        if "pixel_attention_mask" in batch[0]:
+        if "pixel_attention_mask" in batch[0]['text']:
             result["pixel_attention_mask"] = pad_sequence([b["text"]["pixel_attention_mask"] for b in batch], batch_first=True, padding_value=0)
 
         num_val = []
         for b in batch:
-            num_val.extend(b['nums'])
+            if b['nums'] is not None:
+              num_val.extend(b['nums'])
         
         num_val = torch.tensor(num_val, dtype = torch.float32)
 
@@ -244,6 +246,3 @@ class ShaderDataset(Dataset):
             'text': result,
             'nums': num_val
         }
-    
-
-

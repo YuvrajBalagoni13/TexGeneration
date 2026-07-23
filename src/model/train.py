@@ -10,7 +10,6 @@ import json
 import torch.nn.functional as F
 import yaml
 
-
 from transformers import AutoProcessor
 from transformers import Qwen3_5ForConditionalGeneration, Qwen3_5Config
 from peft import LoraConfig, get_peft_model, PeftModel
@@ -36,6 +35,27 @@ def seed_everything(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     os.environ["PYTHONHASHSEED"] = str(seed)
+
+def chunked_cross_entropy(logits, labels, chunk_size=512):
+    total_loss = 0.0
+    total_valid = 0
+    seq_len = logits.size(1)
+    for start in range(0, seq_len, chunk_size):
+        end = min(start + chunk_size, seq_len)
+        chunk_logits = logits[:, start:end, :]
+        chunk_labels = labels[:, start:end]
+        valid = (chunk_labels != -100).sum()
+        if valid == 0:
+            continue
+        loss = F.cross_entropy(
+            chunk_logits.reshape(-1, chunk_logits.size(-1)),
+            chunk_labels.reshape(-1),
+            ignore_index=-100,
+            reduction="sum",
+        )
+        total_loss += loss
+        total_valid += valid
+    return total_loss / total_valid.clamp(min=1)
 
 def main(
         run_name = "Qwen3.5_0.8B_run_2.0",
@@ -75,30 +95,32 @@ def main(
         device = device
     )
     if config['add_regression_head']:
+        print(f"models hidden embed dim : {model.config.text_config.hidden_size}")
         regression_head = RegressionHead(
-            embed_dim = 768,
+            embed_dim = model.config.text_config.hidden_size,
             hidden_dim = 512,
             dropout = 0.01
-        )
+        ).to(device)
+
         model = TexGenModel(
             model = model,
             regression_head = regression_head,
-            trigger_token_id = 12
+            trigger_token_id = 64400
         )
 
     # Get Input Embeddings & LM Head --------------------- #
 
     if config['add_new_tokens']:
-        model = new_tokens(
-                    model = model,
-                    token_json_path = config['tokens_json_path'], 
-                    processor = processor, 
-                    mean_subwords = config['mean_subwords'], 
-                    untie = config['untie'], 
-                    trainable = config['tokens_trainable'],
-                    precision_type = precision_type,
-                    device = device
-                )
+        model.model = new_tokens(
+            model = model.model,
+            token_json_path = config['tokens_json_path'], 
+            processor = processor, 
+            mean_subwords = config['mean_subwords'], 
+            untie = config['untie'], 
+            trainable = config['tokens_trainable'],
+            precision_type = precision_type,
+            device = device
+        )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -184,19 +206,34 @@ def main(
             model.train()
             batch = {k : v.to(device)
                     for k, v in current_batch['text'].items()}
-            num_vals = current_batch['nums']
-            
+            num_vals = current_batch['nums'].to(device)
+            num_vals = torch.sign(num_vals) * torch.log1p(torch.abs(num_vals))
+
             batch_mse_loss = 0.0
             with autocast('cuda', dtype=precision_type):
                 if config['add_regression_head']:
-                    outputs, regressio_preds = model(**batch)
-                    batch_mse_loss = criterion(regressio_preds, num_vals)
-                    batch_mse_loss = batch_mse_loss / ACCUMULATION_INTERVAL
+                    vlm_logits, regression_preds = model(batch)  # positional, matches forward(self, x)
                 else:
                     outputs = model(**batch)
+                    vlm_logits = outputs.logits
+                labels = batch["labels"]
+      
+                shift_logits = vlm_logits[:, :-1, :].contiguous()
+                shift_labels = labels[:, 1:].contiguous()
 
-                batch_loss = outputs.loss
+                batch_loss = chunked_cross_entropy(shift_logits, shift_labels, chunk_size=512)
+                # batch_loss = F.cross_entropy(
+                #     shift_logits.view(-1, shift_logits.size(-1)),
+                #     shift_labels.view(-1),
+                #     ignore_index=-100,
+                # )
                 batch_loss = batch_loss / ACCUMULATION_INTERVAL
+
+                if config['add_regression_head'] and regression_preds is not None:
+                    batch_mse_loss = criterion(regression_preds, num_vals)
+                    batch_mse_loss = batch_mse_loss / ACCUMULATION_INTERVAL
+                else:
+                    batch_mse_loss = torch.tensor(0.0, device=batch_loss.device)
 
             final_loss = config['ce_lambda'] * batch_loss + config['mse_lambda'] * batch_mse_loss
             final_loss.backward()
