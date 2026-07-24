@@ -2,7 +2,8 @@
 
 TexGen is a inverse procedural material model that takes a texture image as input & generates a Blender procedural material graphs for that specific image for highly customizable, editable material workflows.
 
-![alt text](docs/imgs/main_img_dark.png)
+![alt text](docs/imgs/main_img_dark.png)<br>
+UPDATE: Still working on this project so some information code might have mismatch here & there.
 
 # Overview 
 Existing work on material generation focus on synthesizing image based texture maps which are baked & static. TexGen tries to generate the procedural shader graph for the given image which are editable, giving more control in the overall workflow.

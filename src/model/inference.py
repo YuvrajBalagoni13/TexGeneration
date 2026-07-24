@@ -5,17 +5,23 @@ from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 from PIL import Image
 from pathlib import Path
 import json
+
+from typing import Optional, Any
+
+from .model import RegressionHead, TexGenModel
+from .utils import load_checkpoint
    
 class Inference:
     def __init__(
             self,
             model_base: str = None,
-            lora_path: str = None,
+            ckpt_path: str = None,
             quantize: bool = True,
             max_seq_length : int = 450,
             device: str = None,
-            precision_type: any = None,
-            new_tokens: bool = False
+            precision_type: Optional[Any] = None,
+            new_tokens: bool = False,
+            regression_model: bool = True
     ) -> None:
         if device:
             self.device = device
@@ -45,39 +51,45 @@ class Inference:
             }
         ]
 
-        self.model = Qwen3_5ForConditionalGeneration.from_pretrained(
-            model_base,
-            torch_dtype = self.precision_type,
-            device_map = self.device
-        )
+        if regression_model:
+            vlm_model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                model_base,
+                torch_dtype = self.precision_type,
+                device_map = self.device
+            )
+            regression_head = RegressionHead()
+            self.model = TexGenModel(
+                model = vlm_model,
+                regression_head = regression_head,
+                trigger_token_id = 248077
+            )
+        else:
+            self.model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                model_base,
+                torch_dtype = self.precision_type,
+                device_map = self.device
+            )
+                
         self.processor = AutoProcessor.from_pretrained(lora_path)
 
-        if lora_path:
-            self.model.load_adapter(
-                lora_path
+        if ckpt_path:
+            self.model, self.processor = load_checkpoint(
+                base_model = self.model, 
+                processor = self.processor, 
+                checkpoint_directory = ckpt_path,  
+                regression_model = regression_model
             )
 
         if new_tokens:
             new_embeddings = torch.load(Path(lora_path) / "new_embeddings.pth", map_location=self.device)
-            new_lm_head = torch.load(Path(lora_path) / "new_lm_head.pth", map_location=self.device)
 
             if isinstance(new_embeddings, dict):
                 new_embeddings = new_embeddings[list(new_embeddings.keys())[0]]
-            if isinstance(new_lm_head, dict):
-                new_lm_head = new_lm_head[list(new_lm_head.keys())[0]]
 
             self.model.resize_token_embeddings(len(self.processor.tokenizer), pad_to_multiple_of=None)
 
-            if self.model.get_input_embeddings().weight.data_ptr() == self.model.get_output_embeddings().weight.data_ptr():
-                print("Weights are tied, untying ...")
-                self.model.lm_head.weight = torch.nn.Parameter(
-                    self.model.get_output_embeddings().weight.clone()
-                )
-            if self.model.get_input_embeddings().weight.data_ptr() != self.model.get_output_embeddings().weight.data_ptr():
-                print("Weights are untied now!")
             n = new_embeddings.shape[0]
-            self.model.get_input_embeddings().weight.data[-n:]  = new_embeddings.to(self.precision_type)
-            self.model.get_output_embeddings().weight.data[-n:] = new_lm_head.to(self.precision_type)
+            self.model.get_input_embeddings().weight.data[-n:] = new_embeddings.to(self.precision_type)
 
         print("final embedding size:", self.model.get_input_embeddings().weight.shape[0])
         print("tokenizer size:", len(self.processor.tokenizer))
@@ -104,17 +116,16 @@ class Inference:
             inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
 
         with torch.no_grad():
-            output = self.model.generate(
+            output, num_preds = self.model.generate(
                 **inputs,
                 max_new_tokens = self.max_seq_length,
                 do_sample = True,
                 temperature = 0.3,
-                top_p = 0.95,
-                eos_token_id=self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
+                top_p = 0.95
             )
         
         input_length = inputs['input_ids'].shape[1]
-        return self.processor.decode(output[0][input_length:])
+        return self.processor.decode(output[0][input_length:]), num_preds.cpu().numpy().tolist()
     
     def batch_infer(
             self,
@@ -140,21 +151,23 @@ class Inference:
             inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
 
         with torch.no_grad():
-            outputs = self.model.generate(
+            outputs, num_preds = self.model.generate(
                 **inputs,
                 max_new_tokens = self.max_seq_length,
                 do_sample = True,
                 temperature = 0.3,
                 top_p = 0.95,
-                pad_token_id=self.processor.tokenizer.pad_token_id,
-                eos_token_id=self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
+                pad_token_id=self.processor.tokenizer.pad_token_id
             )
         
         results = {}
         for i, output in enumerate(outputs):
             input_length = inputs['input_ids'][i].shape[0]
             decoded = self.processor.decode(output[input_length:], skip_special_tokens=True)
-            results[str(image_paths[i])] = decoded
+            results[str(image_paths[i])] = {
+                "shader_text": decoded,
+                "nums": num_preds.cpu().numpy().tolist()
+            }
         return results
     
 if __name__ == "__main__":

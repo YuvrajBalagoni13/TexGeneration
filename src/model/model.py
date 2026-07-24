@@ -79,13 +79,21 @@ class TexGenModel(nn.Module):
     def generate(
             self,
             x,
-            max_new_tokens: int = 512
+            max_new_tokens: int = 512,
+            do_sample: bool = False,
+            temperature: Optional[float] = None,
+            top_p: Optional[float] = None,
+            pad_token_id: Optional[Any] = None
     ):
         outputs = self.model.generate(
             **x,
             max_new_tokens = max_new_tokens,
             output_hidden_states = True,
             return_dict_in_generate = True
+            do_sample = do_sample,
+            temperature = temperature,
+            top_p = top_p,
+            pad_token_id = pad_token_id
         )
 
         prompt_length = x['input_ids'].shape[1]

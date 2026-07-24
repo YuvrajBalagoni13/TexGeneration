@@ -2,6 +2,7 @@ import os
 import torch
 import wandb
 
+from typing import Optional, Any
 from transformers import AutoProcessor
 
 class SymLogNorm:
@@ -89,7 +90,16 @@ def save_checkpoint(epoch, iteration, run_name, base_model, processor, optimizer
         wandb.log_artifact(artifact)
     print(f"✅ Model for epoch {epoch+1} & {iteration} saved to {checkpoint_directory}")
 
-def load_checkpoint(base_model, processor, optimizer, scheduler, checkpoint_directory, optimizer_directory, new_tokens, regression_model):
+def load_checkpoint(
+    base_model: Any, 
+    processor: Any, 
+    checkpoint_directory: str, 
+    optimizer: Optional[Any] = None, 
+    scheduler: Optional[Any] = None, 
+    optimizer_directory: Optional[str] = None, 
+    new_tokens: bool = False, 
+    regression_model: bool = False
+):
     print(f"------ Loading checkpoint from {checkpoint_directory} ------")
     
     if not regression_model:

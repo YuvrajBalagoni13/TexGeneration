@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 import random
 
 from .dataset import ShaderDataset
-from .inference import UnslothInference, Inference
+from .inference import Inference
 
 def main(
         model_base : str,
@@ -20,11 +20,12 @@ def main(
         data_length : int,
         batch_process : bool,
         batch_size : int,
-        new_tokens : bool
+        new_tokens : bool,
+        regression_model: bool
 ) -> dict:
     # dataset_list = random.sample(list(Path(eval_data_path).rglob("*.jpg")), data_length)
     processor = AutoProcessor.from_pretrained(lora_path)
-    dataset = ShaderDataset(eval_data_path, processor, max_seq_length=450, skip_over_length=True)
+    dataset = ShaderDataset(eval_data_path, processor, max_seq_length=450, skip_over_length=False)
     sample_list = random.sample(dataset.samples, data_length)
 
     dataset_list = []
@@ -37,11 +38,12 @@ def main(
         lora_path=lora_path,
         quantize=quantize,
         max_seq_length=450,
-        new_tokens=new_tokens
+        new_tokens=new_tokens,
+        regression_model=regression_model
     )
 
     if batch_process:
-        batches = [dataset_list[i:i + batch_size] for i in range(0, len(dataset_list), batch_size)]
+        batches = [dataset_list[i:i + batch_size] for i in range(0, 100, batch_size)]
         print(f"----- Processing {len(batches)} batches with {batch_size} batch sizes (total samples = {data_length}) -----")
         for batch in tqdm(batches):
             outputs = inference.batch_infer(batch)
@@ -50,9 +52,12 @@ def main(
                 results[k] = v
     else:
         print(f"----- Processing {len(dataset_list)} images -----")
-        for image in tqdm(dataset_list):
-            output = inference.infer(image)
-            results[str(image)] = output
+        for image in tqdm(dataset_list[:100]):
+            output, num_preds = inference.infer(image)
+            results[str(image)] = {
+                "shader_text": output,
+                "nums": num_preds
+            }
     
     return results
 
@@ -104,6 +109,11 @@ if __name__ == "__main__":
         action="store_true",
         default=False
     )
+    parser.add_argument(
+        "--regression_model",
+        action="store_true",
+        default=False
+    )
     args = parser.parse_args()
 
     results = main(
@@ -114,7 +124,8 @@ if __name__ == "__main__":
         quantize=args.quantize,
         batch_process=args.batch_process,
         batch_size=args.batch_size,
-        new_tokens=args.new_tokens
+        new_tokens=args.new_tokens,
+        regression_model=args.regression_model
     )
 
     with open(args.save_json_path, "w") as f:
