@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 import random
 
 from .dataset import ShaderDataset
-from .inference import Inference
+from .inference import Inference  
 
 def main(
         model_base : str,
@@ -35,7 +35,7 @@ def main(
 
     inference = Inference(
         model_base=model_base,
-        lora_path=lora_path,
+        ckpt_path=lora_path,
         quantize=quantize,
         max_seq_length=450,
         new_tokens=new_tokens,
@@ -43,7 +43,7 @@ def main(
     )
 
     if batch_process:
-        batches = [dataset_list[i:i + batch_size] for i in range(0, 100, batch_size)]
+        batches = [dataset_list[i:i + batch_size] for i in range(0, data_length, batch_size)]
         print(f"----- Processing {len(batches)} batches with {batch_size} batch sizes (total samples = {data_length}) -----")
         for batch in tqdm(batches):
             outputs = inference.batch_infer(batch)
@@ -52,7 +52,7 @@ def main(
                 results[k] = v
     else:
         print(f"----- Processing {len(dataset_list)} images -----")
-        for image in tqdm(dataset_list[:100]):
+        for image in tqdm(dataset_list[:data_length]):
             output, num_preds = inference.infer(image)
             results[str(image)] = {
                 "shader_text": output,

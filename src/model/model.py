@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from unsloth import FastVisionModel
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 def load_model(
         model_name: str,
@@ -89,7 +89,7 @@ class TexGenModel(nn.Module):
             **x,
             max_new_tokens = max_new_tokens,
             output_hidden_states = True,
-            return_dict_in_generate = True
+            return_dict_in_generate = True,
             do_sample = do_sample,
             temperature = temperature,
             top_p = top_p,
@@ -97,28 +97,41 @@ class TexGenModel(nn.Module):
         )
 
         prompt_length = x['input_ids'].shape[1]
-        full_sequence = outputs.sequences[0]
-        new_tokens = full_sequence[prompt_length:]
+        batch_size = outputs.sequences.shape[0]
 
-        valid_hidden_states = []
+        all_new_tokens = []
+        all_regression_preds = []
 
-        for step_idx, token_id in enumerate(new_tokens):
-            if token_id == self.trigger_token_id:
-                step_hidden_state = outputs.hidden_states[step_idx][-1][0, 0, :]
-                valid_hidden_states.append(step_hidden_state)
-        
-        numerical_preds = None
-        if valid_hidden_states:
-            stacked_states = torch.stack(valid_hidden_states)
-            numerical_preds = self.regression_head(stacked_states)
-        
-        return new_tokens, numerical_preds
+        for batch_idx in range(batch_size):
+            full_sequence = outputs.sequences[batch_idx]
+            new_tokens = full_sequence[prompt_length:]
+            all_new_tokens.append(new_tokens)
+
+            valid_hidden_states = []
+            for step_idx, token_id in enumerate(new_tokens):
+                if token_id == self.trigger_token_id:
+                    # outputs.hidden_states[step_idx][-1] shape: (batch_size, 1, hidden_dim) during generation
+                    step_hidden_state = outputs.hidden_states[step_idx][-1][batch_idx, 0, :]
+                    valid_hidden_states.append(step_hidden_state)
+
+            if valid_hidden_states:
+                stacked_states = torch.stack(valid_hidden_states)
+                regression_preds = self.regression_head(stacked_states)
+            else:
+                regression_preds = None
+            all_regression_preds.append(regression_preds)
+
+        return all_new_tokens, all_regression_preds
     
 class RegressionHead(nn.Module):
     def __init__(self, embed_dim: int, hidden_dim: int, dropout: float):
         super().__init__()
         self.linear = nn.Sequential(
-            nn.Linear(embed_dim, 1)
+            nn.Linear(embed_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1)
         )
 
     def forward(self, x):
