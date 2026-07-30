@@ -105,7 +105,7 @@ def main(
         model = TexGenModel(
             model = model,
             regression_head = regression_head,
-            trigger_token_id = 64400
+            trigger_token_id = 248077
         )
 
     # Get Input Embeddings & LM Head --------------------- #
@@ -266,20 +266,29 @@ def main(
                             break
                         batch = {k : v.to(device)
                                 for k, v in eval_batch['text'].items()}
-                        num_vals = eval_batch['nums']
+                        num_vals = eval_batch['nums'].to(device)
 
                         eval_mse_loss = 0.0
                         with autocast('cuda', dtype = precision_type):
-                            if config["add_regression_head"]:
-                                eval_outputs, eval_regression_preds = model(**batch)
-                                eval_mse_loss = criterion(eval_regression_preds, num_vals)
-                            eval_outputs = model(**batch)
-                            eval_batch_loss = eval_outputs.loss
+                            if config['add_regression_head']:
+                                vlm_logits, regression_preds = model(batch)  # positional, matches forward(self, x)
+                            else:
+                                outputs = model(**batch)
+                                vlm_logits = outputs.logits
+                            labels = batch["labels"]
+
+                            shift_logits = vlm_logits[:, :-1, :].contiguous()
+                            shift_labels = labels[:, 1:].contiguous()
+
+                            eval_batch_loss = chunked_cross_entropy(shift_logits, shift_labels, chunk_size=512)
                             
-                        eval_loss += eval_batch_loss.item()
+                            if config['add_regression_head'] and regression_preds is not None:
+                                eval_mse_loss = criterion(regression_preds, num_vals)
+                        
+                        eval_batch_loss += eval_batch_loss.item()
 
                         if eval_idx % 5 == 0:
-                            log_metrics(epoch=epoch, iteration=eval_idx, loss=eval_batch_loss.item(), mse_loss = eval_mse_loss, train=False)
+                            log_metrics(epoch=epoch, iteration=eval_idx, loss=eval_batch_loss, mse_loss = eval_mse_loss.item(), train=False)
 
                 
         loss = loss / len(training_dataloader)

@@ -259,6 +259,6 @@ if __name__ == "__main__":
   --python src/model/renderer.py \
   -- \
   --output_json_path results_new_tokens.json \
-  --save_json_path results_new_tokens.json_RESULTS.json \
-  --render_path RenderedOutputs/new_tokens
+  --save_json_path regressionHead_json_RESULTS.json \
+  --render_path RenderedOutputs/RegressionHead
 """

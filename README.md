@@ -61,10 +61,10 @@ Therefore we have 2 metrics (between rendered image from generated output & inpu
 1. CLIP Similarity Score - For global context
 2. LPIPS Score - For finer details.
 
-|Model|model CE loss|CLIP|LPIPS|no of errors|no of samples trained|
-|---|---|---|---|---|---|---|
-|`LoRA Only`|0.45|0.80|0.70|16|~2k|
-|`New tokens + LoRA`|0.57|0.82|0.72|0|~12k|
+|Model|model CE loss|CLIP|LPIPS|no of errors|
+|---|---|---|---|---|
+|`LoRA Only`|0.45|0.80|0.70|16|
+|`New tokens + LoRA`|0.57|0.82|0.72|0|
 
 As expected, the LoRA-only model learned faster compared to the model with new tokens. It reached a loss of 0.45 after processing roughly 2k samples, then saturated and continued learning slowly afterward. The new-tokens model, on the other hand, plateaued around a CE loss of 0.57 at roughly 12k samples and has remained saturated near that level since taking longer time & resources to adapt.
 As we look at samples themselves then LoRA only model performs better where as for shader language generation LoRA + additional tokens model performed better with minimal issues / errors bacause it is good with the language terminologies but takes way longer to train. for more comparison refer this ['comparison'](docs/COMPARISON.md) (ps - Not yet added).

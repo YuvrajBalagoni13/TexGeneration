@@ -50,6 +50,7 @@ def main(
 
             for k, v in outputs.items():
                 results[k] = v
+    
     else:
         print(f"----- Processing {len(dataset_list)} images -----")
         for image in tqdm(dataset_list[:data_length]):

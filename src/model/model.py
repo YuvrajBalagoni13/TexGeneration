@@ -54,11 +54,31 @@ class TexGenModel(nn.Module):
         self.regression_head = regression_head
         self.trigger_token_id = trigger_token_id
 
-        last_layer = self.model.base_model.model.model.language_model.layers[-1]
+        last_layer = self.model.base_model.language_model.layers[-1]
         last_layer.register_forward_hook(self._capture_hidden)
 
     def _capture_hidden(self, module, input, output):
         self._last_hidden_state = output[0] if isinstance(output, tuple) else output
+
+    @staticmethod
+    def get_last_layer(model_instance):
+        current = model_instance
+        while True:
+          if hasattr(current, 'base_model') and current.base_model is not current:
+            current = current.base_model
+            print("base_model")
+          elif hasattr(current, 'model') and current.model is not current:
+            current = current.model
+            print("model")
+          elif hasattr(current, 'language_model') and current.language_model is not current:
+            current = current.language_model
+            print("language_model")
+          else:
+            break
+        
+        if hasattr(current, 'layers'):
+          return current.layers[-1]
+        raise AttributeError(f"Couldn't find transformer layers in {type(current).__name__}")
 
     def forward(self, x):
         model_inputs = {k: v for k, v in x.items() if k != "labels"}
@@ -83,8 +103,10 @@ class TexGenModel(nn.Module):
             do_sample: bool = False,
             temperature: Optional[float] = None,
             top_p: Optional[float] = None,
-            pad_token_id: Optional[Any] = None
+            pad_token_id: Optional[Any] = None,
+            eos_token_id: Optional[Any] = None
     ):
+        
         outputs = self.model.generate(
             **x,
             max_new_tokens = max_new_tokens,
@@ -93,7 +115,8 @@ class TexGenModel(nn.Module):
             do_sample = do_sample,
             temperature = temperature,
             top_p = top_p,
-            pad_token_id = pad_token_id
+            pad_token_id = pad_token_id,
+            eos_token_id = eos_token_id
         )
 
         prompt_length = x['input_ids'].shape[1]
@@ -116,7 +139,7 @@ class TexGenModel(nn.Module):
 
             if valid_hidden_states:
                 stacked_states = torch.stack(valid_hidden_states)
-                regression_preds = self.regression_head(stacked_states)
+                regression_preds = self.regression_head(stacked_states).squeeze(-1)
             else:
                 regression_preds = None
             all_regression_preds.append(regression_preds)
