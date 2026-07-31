@@ -104,23 +104,36 @@ def main(
 
         model = TexGenModel(
             model = model,
-            regression_head = regression_head,
-            trigger_token_id = 248077
+            regression_head = regression_head
         )
 
-    # Get Input Embeddings & LM Head --------------------- #
+    # Add New tokens --------------------- #
 
     if config['add_new_tokens']:
-        model.model = new_tokens(
-            model = model.model,
-            token_json_path = config['tokens_json_path'], 
-            processor = processor, 
-            mean_subwords = config['mean_subwords'], 
-            untie = config['untie'], 
-            trainable = config['tokens_trainable'],
-            precision_type = precision_type,
-            device = device
-        )
+        if config['add_regression_head']:
+            model.model = new_tokens(
+                model = model.model,
+                token_json_path = config['tokens_json_path'], 
+                processor = processor, 
+                mean_subwords = config['mean_subwords'], 
+                untie = config['untie'], 
+                trainable = config['tokens_trainable'],
+                precision_type = precision_type,
+                device = device
+            )
+            model.trigger_token_id = processor.tokenizer.convert_tokens_to_ids('<NUM>')
+            print(f"<NUM> token id : {model.trigger_token_id}")
+        else:
+            model = new_tokens(
+                model = model,
+                token_json_path = config['tokens_json_path'], 
+                processor = processor, 
+                mean_subwords = config['mean_subwords'], 
+                untie = config['untie'], 
+                trainable = config['tokens_trainable'],
+                precision_type = precision_type,
+                device = device
+            )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())

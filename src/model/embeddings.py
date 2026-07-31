@@ -45,11 +45,10 @@ def new_tokens(
             subwords_id = processor.tokenizer.convert_tokens_to_ids(subwords)
             subwords_id_list.append(subwords_id)
         
-    processor.tokenizer.add_tokens(new_tokens)
+    processor.tokenizer.add_tokens(tokens_dict["new_tokens"])
     processor.tokenizer.add_special_tokens({
         "additional_special_tokens" : tokens_dict["special_tokens"]
     })
-    print(f"<NUM> tokens id - {processor.tokenizer.convert_tokens_to_ids('<NUM>')}")
     # untying the weights
     # if untie:
     #     if model.get_input_embeddings().weight.data_ptr() == model.get_output_embeddings().weight.data_ptr():
