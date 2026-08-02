@@ -1,15 +1,20 @@
 # from unsloth import FastVisionModel
 import torch
+import json
+import random
+import argparse
+import re
+
+from tqdm import tqdm
+from typing import Optional, Any
 from peft import PeftModel
 from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 from PIL import Image
 from pathlib import Path
-import json
-
-from typing import Optional, Any
 
 from .model import RegressionHead, TexGenModel
 from .utils import load_checkpoint
+from .dataset import ShaderDataset
 
 class Inference:
     def __init__(
@@ -107,41 +112,8 @@ class Inference:
         print("final embedding size:", self.model.model.get_input_embeddings().weight.shape[0])
         print("tokenizer size:", len(self.processor.tokenizer))
         self.model.model.eval()
-    
+
     def infer(
-            self,
-            image_path : str = None,
-            prompt : str = None
-    ) -> str:
-        image = Image.open(image_path)
-        text = self.processor.apply_chat_template(
-            self.message,
-            tokenize = False,
-            add_generation_prompt = True
-        )
-        inputs = self.processor(
-            text = [text],
-            images = [image],
-            return_tensors = "pt",
-            padding = True
-        ).to(self.device)
-
-        if "pixel_values" in inputs:
-            inputs["pixel_values"] = inputs["pixel_values"].to(self.precision_type)
-
-        with torch.no_grad():
-            output, num_preds = self.model.generate(
-                inputs,
-                max_new_tokens = self.max_seq_length,
-                do_sample = True,
-                temperature = 0.3,
-                top_p = 0.95
-            )
-        
-        input_length = inputs['input_ids'].shape[1]
-        return self.processor.decode(output[0][input_length:]), num_preds.cpu().numpy().tolist()
-    
-    def batch_infer(
             self,
             image_paths : list[str] = None,
             prompt : str = None
@@ -189,19 +161,124 @@ class Inference:
             preds = [f"{pred:.3f}" for pred in preds] 
 
             decoded = decoded.replace("<|im_end|>", "")
+            decoded = decoded.replace("<|endoftext|>", "")
             preds_iter = iter(preds)
             final_shader_text = re.sub(r"<NUM>", lambda match: next(preds_iter), decoded)
             results[str(image_paths[i])] = final_shader_text
         return results
             
-if __name__ == "__main__":
+def main(
+        model_base : str,
+        lora_path : str,
+        eval_data_path : str,
+        quantize : bool,
+        data_length : int,
+        batch_size : int,
+        new_tokens : bool,
+        regression_model: bool
+) -> dict:
+    # dataset_list = random.sample(list(Path(eval_data_path).rglob("*.jpg")), data_length)
+    processor = AutoProcessor.from_pretrained(lora_path)
+    dataset = ShaderDataset(eval_data_path, processor, max_seq_length=450, skip_over_length=False)
+    sample_list = random.sample(dataset.samples, data_length)
+
+    dataset_list = []
+    results = {}
+    for sample in sample_list:
+      dataset_list.append(sample['image'])
+
     inference = Inference(
-        model_base = "Unsloth/Qwen3.5-0.8B",
-        lora_path = "artifacts/texgen_lora_LoRA_token_main:v12/texgen_LoRA_token_main_1_1750",
-        quantize = True,
-        max_seq_length = 450,
-        device = 'cpu',
-        new_tokens = True
+        model_base=model_base,
+        ckpt_path=lora_path,
+        quantize=quantize,
+        max_seq_length=512,
+        new_tokens=new_tokens,
+        regression_model=regression_model
     )
-    output = inference.infer(image_path="ShaderDataset/val/mat_llm/case_00000_gen_02/00001.jpg")
-    print(output)
+
+    batches = [dataset_list[i:i + batch_size] for i in range(0, data_length, batch_size)]
+    print(f"----- Processing {len(batches)} batches with {batch_size} batch sizes (total samples = {data_length}) -----")
+    for batch in tqdm(batches):
+        outputs = inference.infer(batch)
+        for k, v in outputs.items():
+            results[k] = v
+
+    return results
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--base_model",
+        type=str,
+        required=True,
+        help="base model weights path if saved or download base model"
+    )
+    parser.add_argument(
+        "--eval_data_path",
+        type=str,
+        required=True
+    )
+    parser.add_argument(
+        "--lora_path",
+        type=str,
+        default=None
+    )
+    parser.add_argument(
+        "--save_json_path",
+        type=str,
+        default=None
+    )
+    parser.add_argument(
+        "--data_length",
+        type=int,
+        default=100
+    )
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=4
+    )
+    parser.add_argument(
+        "--new_tokens",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--regression_model",
+        action="store_true",
+        default=False
+    )
+    args = parser.parse_args()
+
+    results = main(
+        model_base=args.base_model,
+        lora_path=args.lora_path,
+        eval_data_path=args.eval_data_path,
+        data_length=args.data_length,
+        quantize=args.quantize,
+        batch_size=args.batch_size,
+        new_tokens=args.new_tokens,
+        regression_model=args.regression_model
+    )
+
+    with open(args.save_json_path, "w") as f:
+        json.dump(results, f, indent=4)
+    print(f"----- Saved results in {args.save_json_path} -----")
+
+"""
+python -m src.model.inference \
+--base_model Qwen/Qwen3.5-0.8B \
+--lora_path lorapath \
+--eval_data_path datapath \
+--save_json_path jsonpath \
+--data_length 1000 \
+--quantize \
+--batch_process \
+--batch_size 4 \
+--new_tokens
+"""

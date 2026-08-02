@@ -258,7 +258,7 @@ if __name__ == "__main__":
   --background \
   --python src/model/renderer.py \
   -- \
-  --output_json_path results_new_tokens.json \
-  --save_json_path regressionHead_json_RESULTS.json \
-  --render_path RenderedOutputs/RegressionHead
+  --output_json_path results_REGRESSION_HEAD_sample_0_3.json \
+  --save_json_path REGRESSION_HEAD_sample_0_3_BETTERDATA_RESULTS.json \
+  --render_path RenderedOutputs/RegressionHead_BETTERDATA_SAMPLE_REGRESSION_HEAD_sample_0_3
 """

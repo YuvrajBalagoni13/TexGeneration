@@ -135,5 +135,5 @@ if __name__ == "__main__":
 
 """
 python -m src.model.metrics \
---result_json_path /home/ML/TextureGeneration/result_inference_json/results/results_lora_only_RESULTS.json
+--result_json_path REGRESSION_HEAD_sample_0_3_BETTERDATA_RESULTS.json
 """
