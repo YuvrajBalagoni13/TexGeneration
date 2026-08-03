@@ -135,5 +135,5 @@ if __name__ == "__main__":
 
 """
 python -m src.model.metrics \
---result_json_path REGRESSION_HEAD_sample_0_3_BETTERDATA_RESULTS.json
+--result_json_path example_RESULT.json
 """
